@@ -1,0 +1,92 @@
+# Azure OpenAI CLI Chatbot Dependencies
+# Task 20: All necessary dependencies with version constraints
+
+# Core Azure OpenAI and LangChain Dependencies
+langchain-openai>=0.1.0,<0.2.0
+langchain>=0.1.0,<0.3.0
+openai>=1.55.0,<2.0.0
+
+# Azure SDK Dependencies for Key Vault and Identity
+azure-identity>=1.15.0,<2.0.0
+azure-keyvault-secrets>=4.8.0,<5.0.0
+azure-core>=1.29.0,<2.0.0
+
+# Azure Monitoring and Application Insights
+opencensus-ext-azure>=1.1.0,<2.0.0
+opencensus>=0.11.0,<1.0.0
+
+# Configuration Management
+pydantic>=2.2.0,<3.0.0
+pydantic-settings>=2.2.0,<3.0.0
+python-dotenv>=1.0.0,<2.0.0
+
+# CLI Framework and Console Output
+click>=8.1.0,<9.0.0
+rich>=13.0.0,<14.0.0
+typer>=0.9.0,<1.0.0
+
+# Structured Logging
+structlog>=23.1.0,<24.0.0
+
+# HTTP Client and Async Support
+httpx>=0.25.0,<1.0.0
+aiohttp>=3.9.0,<4.0.0
+
+# Retry Logic and Resilience
+tenacity>=8.2.0,<9.0.0
+
+# JSON Processing and Utilities
+jsonpointer>=2.3,<3.0
+jsonschema>=4.17.0,<5.0.0
+
+# Development and Testing Dependencies
+pytest>=7.4.0,<8.0.0
+pytest-asyncio>=0.21.0,<1.0.0
+pytest-mock>=3.11.0,<4.0.0
+pytest-cov>=4.1.0,<5.0.0
+
+# Code Quality and Formatting (development tools - optional)
+# black>=23.7.0,<24.0.0
+# ruff>=0.0.290,<1.0.0
+# mypy>=1.5.0,<2.0.0
+# pre-commit>=3.4.0,<4.0.0
+
+# Type Stubs (optional - for development type checking)
+# Uncomment these if you're doing type checking with mypy
+# types-requests>=2.31.0,<3.0.0
+# types-python-dotenv>=1.0.0,<2.0.0  # Not available in all indexes
+
+# Additional Utilities
+pathlib2>=2.3.0,<3.0.0; python_version < "3.4"
+backoff>=2.2.0,<3.0.0
+uuid6>=2023.5.2,<2024.0.0
+
+# Web Server (if deploying as web app)
+uvicorn[standard]>=0.24.0,<1.0.0
+gunicorn>=20.1.0,<21.0.0
+
+# Security and Cryptography
+cryptography>=41.0.0,<42.0.0
+
+# Data Processing (if needed for conversation history)
+pandas>=2.0.0,<3.0.0; python_version >= "3.8"
+
+# Optional: Enhanced terminal features
+colorama>=0.4.6,<1.0.0; platform_system == "Windows"
+
+# Optional: Progress bars and status indicators  
+tqdm>=4.65.0,<5.0.0
+
+# Optional: Configuration file formats
+toml>=0.10.2,<1.0.0
+pyyaml>=6.0,<7.0.0
+
+# Pin specific versions for stability in production
+# These can be uncommented and adjusted for production deployments
+# langchain-openai==0.1.8
+# openai==1.55.3
+# azure-identity==1.15.0
+# pydantic==2.5.3
+# click==8.1.7
+# rich==13.7.0
+# structlog==23.2.0

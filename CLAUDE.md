@@ -15,6 +15,25 @@
 - **Use clear, consistent imports** (prefer relative imports within packages).
 - **Use python_dotenv and load_env()** for environment variables.
 
+### Technical Architecture
+- **langchain-opena** for Azure OpenAI integration
+- **azure-identity** for authentication
+- **structlog** for JSON logging
+- **python-dotenv** for configuration management
+- **click** for CLI interface
+- **rich** for enhanced console output
+
+### 🔍 Logging Standards
+- **All logs must include a `log_type` property** at the top level (not in customDimensions) for Azure Log Analytics categorization.
+- **Use these 5 standardized log_type values:**
+  - `CONVERSATION` - Chat interactions, message processing, conversation flow
+  - `AZURE_OPENAI` - Azure OpenAI API calls, responses, token usage
+  - `PERFORMANCE` - Response times, throughput metrics, resource usage
+  - `SECURITY` - Authentication, Key Vault operations, credential management
+  - `SYSTEM` - Application lifecycle, configuration, health checks, errors
+- **Add log_type when creating loggers**: `logger.bind(log_type="CATEGORY")`
+- **Use structured logging helpers** in `utils/logging_helpers.py` which automatically set appropriate log_type values
+
 ### 🧪 Testing & Reliability
 - **Always create Pytest unit tests for new features** (functions, classes, routes, etc).
 - **After updating any logic**, check whether existing unit tests need to be updated. If so, do it.
