@@ -6,9 +6,13 @@ __pycache__
 
 # Environment files - NEVER commit these!
 .env
-.env.*
-*.env
+.env.local
+.env.development
+.env.production
 .env.backup.*
+# Allow template files
+!.env.template
+!.env.example
 
 # Terraform files and directories
 .terraform/
