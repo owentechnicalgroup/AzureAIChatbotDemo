@@ -11,9 +11,8 @@ azure-identity>=1.15.0,<2.0.0
 azure-keyvault-secrets>=4.8.0,<5.0.0
 azure-core>=1.29.0,<2.0.0
 
-# Azure Monitoring and Application Insights
-opencensus-ext-azure>=1.1.0,<2.0.0
-opencensus>=0.11.0,<1.0.0
+# Azure Monitoring and Application Insights - Modernized with OpenTelemetry
+azure-monitor-opentelemetry>=1.6.0,<2.0.0
 
 # Configuration Management
 pydantic>=2.2.0,<3.0.0

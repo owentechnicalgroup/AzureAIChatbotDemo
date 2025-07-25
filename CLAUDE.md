@@ -23,6 +23,15 @@
 - **click** for CLI interface
 - **rich** for enhanced console output
 
+### 🚀 Environment Setup & Configuration
+- **Always update `.\scripts\setup-env.ps1`** when adding new environment variables to the application.
+- **Environment variables must be added in 3 places:**
+  1. `infrastructure/outputs.tf` - Add to the `environment_variables` output section
+  2. `scripts/setup-env.ps1` - Add to the `New-EnvContent` function with proper documentation
+  3. `src/config/settings.py` - Add as pydantic settings fields with proper types and defaults
+- **The setup-env.ps1 script** extracts Terraform outputs and generates the `.env` file automatically.
+- **Never manually edit the generated `.env` file** - it gets overwritten by the setup script.
+
 ### 🔍 Logging Standards
 - **All logs must include a `log_type` property** at the top level (not in customDimensions) for Azure Log Analytics categorization.
 - **Use these 5 standardized log_type values:**

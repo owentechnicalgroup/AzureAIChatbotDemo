@@ -147,12 +147,29 @@ class Settings(BaseSettings):
     applicationinsights_connection_string: Optional[str] = Field(
         None,
         env='APPLICATIONINSIGHTS_CONNECTION_STRING',
-        description="Application Insights connection string"
+        description="Application Insights connection string for application logging"
     )
     application_insights_enabled: bool = Field(
         True,
         env='APPLICATION_INSIGHTS_ENABLED',
         description="Enable Application Insights logging"
+    )
+    
+    # AI Chat Observability Configuration
+    chat_observability_connection_string: Optional[str] = Field(
+        None,
+        env='CHAT_OBSERVABILITY_CONNECTION_STRING',
+        description="Dedicated connection string for AI chat observability workspace"
+    )
+    enable_chat_observability: bool = Field(
+        True,
+        env='ENABLE_CHAT_OBSERVABILITY',
+        description="Enable specialized AI chat observability system"
+    )
+    enable_cross_correlation: bool = Field(
+        True,
+        env='ENABLE_CROSS_CORRELATION',
+        description="Enable correlation between application and chat observability systems"
     )
     
     # Environment Configuration
@@ -304,6 +321,15 @@ class Settings(BaseSettings):
                 self.applicationinsights_connection_string = app_insights
                 secrets_loaded += 1
             
+            # Chat Observability connection string
+            chat_observability = self._get_secret_or_fallback(
+                client, "chat-observability-connection-string",
+                self.chat_observability_connection_string
+            )
+            if chat_observability != self.chat_observability_connection_string:
+                self.chat_observability_connection_string = chat_observability
+                secrets_loaded += 1
+            
             logger.info(
                 "Successfully loaded configuration from Key Vault",
                 secrets_loaded=secrets_loaded,
@@ -435,6 +461,15 @@ class Settings(BaseSettings):
             self.azure_openai_deployment
         )
     
+    def has_dual_observability_config(self) -> bool:
+        """Check if dual observability configuration is complete."""
+        return bool(
+            self.applicationinsights_connection_string and
+            (not self.enable_chat_observability or 
+             self.chat_observability_connection_string or 
+             self.applicationinsights_connection_string)  # Can fallback to same connection string
+        )
+    
     def validate_configuration(self) -> Dict[str, bool]:
         """
         Validate the current configuration.
@@ -447,11 +482,14 @@ class Settings(BaseSettings):
             'azure_openai_configured': self.has_azure_openai_config(),
             'logging_configured': bool(self.log_file_path),
             'application_insights_configured': bool(self.applicationinsights_connection_string),
+            'dual_observability_configured': self.has_dual_observability_config(),
+            'chat_observability_enabled': self.enable_chat_observability,
         }
         
         results['configuration_complete'] = all([
             results['azure_openai_configured'],
-            results['logging_configured']
+            results['logging_configured'],
+            results['dual_observability_configured']
         ])
         
         return results
@@ -469,6 +507,9 @@ class Settings(BaseSettings):
             'file_path': self.log_file_path,
             'enable_conversation_logging': self.enable_conversation_logging,
             'application_insights_connection_string': self.applicationinsights_connection_string,
+            'chat_observability_connection_string': self.chat_observability_connection_string,
+            'enable_chat_observability': self.enable_chat_observability,
+            'enable_cross_correlation': self.enable_cross_correlation,
         }
     
     def __repr__(self) -> str:

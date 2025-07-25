@@ -1,0 +1,25 @@
+2025-07-22 16:54:57 ℹ️  🚀 Azure OpenAI CLI Chatbot - PowerShell Deployment
+2025-07-22 16:54:57 ℹ️  Starting deployment for environment: dev
+2025-07-22 16:54:57 ℹ️  Target location: East US
+2025-07-22 16:54:57 ℹ️  Checking prerequisites...
+2025-07-22 16:54:57 ✅ Terraform is available
+2025-07-22 16:54:57 ✅ Azure CLI is available
+2025-07-22 16:54:58 ✅ Azure CLI is authenticated as: mowen@MoKnowsTech.onmicrosoft.com
+2025-07-22 16:54:58 ℹ️  Using subscription: Azure subscription 1 (dce7ee6c-47c0-495d-8dad-c6b0a884cbed)
+2025-07-22 16:54:58 ✅ Prerequisites check passed
+2025-07-22 16:54:58 ℹ️  Validating Terraform backend configuration...
+2025-07-22 16:54:58 ✅ Backend storage account: tfstatedeveb885f04
+2025-07-22 16:54:58 ℹ️  Validating storage account accessibility...
+2025-07-22 16:54:59 ✅ Storage account is accessible
+2025-07-22 16:54:59 ℹ️  Initializing Terraform...
+2025-07-22 16:54:59 ⚠️  Removing existing .terraform directory for reinit
+2025-07-22 16:55:00 ℹ️  Running terraform init...
+2025-07-22 16:55:15 ✅ Terraform initialization completed
+2025-07-22 16:55:15 ℹ️  Running Terraform plan...
+2025-07-22 16:55:37 ✅ Plan completed successfully - changes detected
+2025-07-22 16:55:37 ℹ️  Plan saved to: tfplan-dev-20250722165515
+2025-07-22 16:55:37 ℹ️  Applying Terraform configuration...
+2025-07-22 16:56:36 ❌ Terraform apply failed: Terraform apply failed
+2025-07-22 16:56:36 ❌ ❌ Deployment failed: Terraform apply failed
+2025-07-22 16:56:36 ❌ Check the log file for details: C:\Users\owenm\OneDrive - Mo Knows Tech\context-engineering-intro\logs\deployment-20250722-165457.log
+2025-07-22 16:56:37 ❌ Failed after 00:01:39

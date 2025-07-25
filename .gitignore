@@ -3,3 +3,21 @@ venv_linux
 __pycache__
 .ruff_cache
 .pytest_cache
+
+# Environment files - NEVER commit these!
+.env
+.env.*
+*.env
+.env.backup.*
+
+# Terraform files and directories
+.terraform/
+.terraform.lock.hcl
+*.tfstate
+*.tfstate.*
+*.tfvars
+*.tfplan
+*.tfplan.*
+
+# Ignore examples folder (external repositories)
+examples/

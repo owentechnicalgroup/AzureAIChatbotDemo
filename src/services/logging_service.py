@@ -1,6 +1,7 @@
 """
-Enhanced structured logging service with Azure Log Analytics integration.
-Provides proper field mapping for Azure Application Insights and Log Analytics.
+Enhanced structured logging service with dual Azure OpenTelemetry observability.
+Provides routing between Application Logging and AI Chat Observability systems.
+Maintains backward compatibility with existing logging patterns.
 """
 
 import logging
@@ -18,12 +19,18 @@ import uuid
 
 from config.settings import Settings
 
+# Import dual observability system
 try:
-    from opencensus.ext.azure.log_exporter import AzureLogHandler
-    from opencensus.trace import execution_context
-    AZURE_AVAILABLE = True
+    from observability.telemetry_service import (
+        initialize_dual_observability, 
+        route_log_by_type, 
+        get_application_logger, 
+        get_chat_observer,
+        is_telemetry_initialized
+    )
+    DUAL_OBSERVABILITY_AVAILABLE = True
 except ImportError:
-    AZURE_AVAILABLE = False
+    DUAL_OBSERVABILITY_AVAILABLE = False
 
 
 class ConversationContextFilter(logging.Filter):
@@ -160,36 +167,40 @@ class EnhancedApplicationInsightsFormatter(logging.Formatter):
             
         return dimensions
     
+    def _safe_float_conversion(self, value: Any) -> Optional[float]:
+        """Safely convert a value to float, returning None if invalid."""
+        if value is None:
+            return None
+        if isinstance(value, (int, float)):
+            return float(value)
+        if isinstance(value, str):
+            try:
+                return float(value)
+            except ValueError:
+                return None
+        try:
+            return float(value)
+        except (ValueError, TypeError, AttributeError):
+            return None
+
     def _extract_custom_measurements(self, record: logging.LogRecord) -> Dict[str, float]:
         """Extract numeric metrics for customMeasurements."""
         measurements = {}
         
-        # Performance metrics
-        if hasattr(record, 'response_time') and record.response_time is not None:
-            measurements['response_time'] = float(record.response_time)
-        if hasattr(record, 'duration') and record.duration is not None:
-            measurements['duration'] = float(record.duration)
-            
-        # Token usage metrics
-        if hasattr(record, 'tokens_prompt') and record.tokens_prompt is not None:
-            measurements['tokens_prompt'] = float(record.tokens_prompt)
-        if hasattr(record, 'tokens_completion') and record.tokens_completion is not None:
-            measurements['tokens_completion'] = float(record.tokens_completion)
-        if hasattr(record, 'tokens_total') and record.tokens_total is not None:
-            measurements['tokens_total'] = float(record.tokens_total)
-            
-        # Request metrics
-        if hasattr(record, 'request_size') and record.request_size is not None:
-            measurements['request_size'] = float(record.request_size)
-        if hasattr(record, 'response_size') and record.response_size is not None:
-            measurements['response_size'] = float(record.response_size)
-            
-        # Conversation metrics
-        if hasattr(record, 'turn_number') and record.turn_number is not None:
-            measurements['turn_number'] = float(record.turn_number)
-        if hasattr(record, 'message_length') and record.message_length is not None:
-            measurements['message_length'] = float(record.message_length)
-            
+        # Define all possible numeric fields with safe extraction
+        numeric_fields = [
+            'response_time', 'duration', 'tokens_prompt', 'tokens_completion', 
+            'tokens_total', 'request_size', 'response_size', 'turn_number', 
+            'message_length'
+        ]
+        
+        # Process each numeric field safely
+        for field in numeric_fields:
+            if hasattr(record, field):
+                value = self._safe_float_conversion(getattr(record, field))
+                if value is not None and value >= 0:  # Only include valid positive numbers
+                    measurements[field] = value
+    
         return measurements
     
     def _get_clean_message(self, record: logging.LogRecord) -> str:
@@ -224,16 +235,9 @@ class EnhancedApplicationInsightsFormatter(logging.Formatter):
         if hasattr(record, 'operation_id') and record.operation_id:
             return str(record.operation_id)
         
-        # Try to get from execution context
-        if AZURE_AVAILABLE:
-            try:
-                tracer = execution_context.get_opencensus_tracer()
-                if tracer and tracer.span_context:
-                    return tracer.span_context.trace_id
-            except Exception:
-                pass
-                
-        return None
+        # Generate a new operation ID if not available
+        # In dual observability, correlation is handled by the routing system
+        return str(uuid.uuid4())
     
     def _get_operation_name(self, record: logging.LogRecord) -> Optional[str]:
         """Get operation name for request classification."""
@@ -364,44 +368,62 @@ def setup_console_logging(settings: Settings) -> Optional[logging.Handler]:
     return console_handler
 
 
-def setup_application_insights_logging(settings: Settings) -> Optional[logging.Handler]:
-    """Set up Azure Application Insights logging if configured."""
+def setup_dual_observability_logging(settings: Settings) -> bool:
+    """Set up dual observability system with Azure Monitor OpenTelemetry.
+    
+    Returns:
+        bool: True if setup successful, False otherwise
+    """
     if not settings.applicationinsights_connection_string:
-        return None
+        logging.getLogger(__name__).warning(
+            "Application Insights connection string not configured. Dual observability disabled."
+        )
+        return False
     
     try:
-        # Try to import and set up Application Insights
-        from opencensus.ext.azure.log_exporter import AzureLogHandler
+        if not DUAL_OBSERVABILITY_AVAILABLE:
+            logging.getLogger(__name__).error(
+                "Dual observability system not available. Check imports and dependencies."
+            )
+            return False
         
-        ai_handler = AzureLogHandler(
-            connection_string=settings.applicationinsights_connection_string
-        )
+        # Initialize the dual observability system
+        success = initialize_dual_observability(settings)
         
-        # Set the cloud role name for Application Insights
-        # This maps to AppRoleName in Azure Log Analytics
-        def add_role_name(envelope):
-            envelope.tags['ai.cloud.role'] = 'aoai-chatbot'
-            envelope.tags['ai.cloud.roleInstance'] = f'aoai-chatbot-{os.getenv("HOSTNAME", "local")}'
-            return True
+        if success:
+            logging.getLogger(__name__).info(
+                "Dual observability system initialized successfully",
+                extra={
+                    'log_type': 'SYSTEM',
+                    'component': 'logging_service',
+                    'operation_type': 'initialization',
+                    'success': True
+                }
+            )
+        else:
+            logging.getLogger(__name__).error(
+                "Failed to initialize dual observability system",
+                extra={
+                    'log_type': 'SYSTEM',
+                    'component': 'logging_service',
+                    'operation_type': 'initialization',
+                    'success': False
+                }
+            )
         
-        ai_handler.add_telemetry_processor(add_role_name)
+        return success
         
-        # Use enhanced formatter that's compatible with Application Insights
-        ai_handler.setFormatter(EnhancedApplicationInsightsFormatter())
-        ai_handler.addFilter(ConversationContextFilter())
-        
-        return ai_handler
-        
-    except ImportError:
-        logging.getLogger(__name__).warning(
-            "opencensus-ext-azure not installed. Application Insights logging disabled."
-        )
-        return None
     except Exception as e:
         logging.getLogger(__name__).error(
-            f"Failed to setup Application Insights logging: {e}"
+            f"Error setting up dual observability logging: {e}",
+            extra={
+                'log_type': 'SYSTEM',
+                'component': 'logging_service',
+                'error_type': type(e).__name__,
+                'success': False
+            }
         )
-        return None
+        return False
 
 
 def configure_structlog(settings: Settings) -> None:
@@ -436,7 +458,7 @@ def configure_structlog(settings: Settings) -> None:
 
 def setup_logging(settings: Optional[Settings] = None) -> None:
     """
-    Set up comprehensive logging configuration.
+    Set up comprehensive logging configuration with dual observability.
     
     Args:
         settings: Application settings instance
@@ -474,17 +496,12 @@ def setup_logging(settings: Optional[Settings] = None) -> None:
     except Exception as e:
         logging.error(f"Failed to setup console logging: {e}")
     
-    # Application Insights logging
+    # Initialize dual observability system
+    dual_observability_success = False
     try:
-        ai_handler = setup_application_insights_logging(settings)
-        if ai_handler:
-            # Ensure the handler has a proper lock
-            if not hasattr(ai_handler, 'lock') or ai_handler.lock is None:
-                import threading
-                ai_handler.lock = threading.RLock()
-            handlers.append(ai_handler)
+        dual_observability_success = setup_dual_observability_logging(settings)
     except Exception as e:
-        logging.error(f"Failed to setup Application Insights logging: {e}")
+        logging.error(f"Failed to setup dual observability logging: {e}")
     
     # Add all handlers to root logger
     for handler in handlers:
@@ -501,12 +518,14 @@ def setup_logging(settings: Optional[Settings] = None) -> None:
     # Log successful setup
     logger = structlog.get_logger(__name__)
     logger.info(
-        "Logging configured",
+        "Logging configured with dual observability",
         level=settings.log_level,
         format=settings.log_format,
         file_path=settings.log_file_path,
         handlers=len(handlers),
-        application_insights_enabled=bool(settings.applicationinsights_connection_string)
+        dual_observability_enabled=dual_observability_success,
+        application_insights_enabled=bool(settings.applicationinsights_connection_string),
+        chat_observability_enabled=bool(settings.enable_chat_observability)
     )
 
 
@@ -542,6 +561,9 @@ def log_conversation_event(
     """
     Log a conversation event with structured data.
     
+    Routes to AI Chat Observability system for conversation analysis.
+    Maintains backward compatibility with existing usage patterns.
+    
     Args:
         event: Event type (e.g., 'message_received', 'response_generated')
         conversation_id: Unique conversation identifier
@@ -552,6 +574,29 @@ def log_conversation_event(
         error: Error message if applicable (optional)
         **additional_context: Additional context to include
     """
+    if DUAL_OBSERVABILITY_AVAILABLE and is_telemetry_initialized():
+        # Use the new chat observability system
+        try:
+            from observability.chat_observability import log_conversation_event as new_log_conversation_event
+            
+            new_log_conversation_event(
+                event=event,
+                conversation_id=conversation_id,
+                user_message=user_message,
+                assistant_response=assistant_response,
+                token_usage=token_usage,
+                response_time=response_time,
+                error=error,
+                **additional_context
+            )
+            return
+        except Exception as e:
+            # Fallback to legacy logging if new system fails
+            logging.getLogger(__name__).warning(
+                f"Failed to use new chat observability system, falling back to legacy: {e}"
+            )
+    
+    # Legacy fallback using structlog
     logger = get_logger(__name__).bind(
         conversation_id=conversation_id,
         event_type="conversation",
@@ -595,12 +640,35 @@ def log_performance_metrics(
     """
     Log performance metrics.
     
+    Routes to Application Logging system for performance monitoring.
+    Maintains backward compatibility with existing usage patterns.
+    
     Args:
         operation: Operation name
         duration: Operation duration in seconds
         success: Whether operation was successful
         **metrics: Additional metrics to log
     """
+    if DUAL_OBSERVABILITY_AVAILABLE and is_telemetry_initialized():
+        # Use the new application logging system
+        try:
+            from observability.application_logging import log_performance_event
+            
+            log_performance_event(
+                message=f"Performance metric: {operation}",
+                response_time=duration,
+                success=success,
+                operation_name=operation,
+                **metrics
+            )
+            return
+        except Exception as e:
+            # Fallback to legacy logging if new system fails
+            logging.getLogger(__name__).warning(
+                f"Failed to use new application logging system, falling back to legacy: {e}"
+            )
+    
+    # Legacy fallback using structlog
     logger = get_logger(__name__).bind(
         event_type="performance",
         log_type="PERFORMANCE"
@@ -624,12 +692,34 @@ def log_security_event(
     """
     Log security-related events.
     
+    Routes to Application Logging system for security auditing.
+    Maintains backward compatibility with existing usage patterns.
+    
     Args:
         event_type: Type of security event
         details: Event details
         severity: Severity level
         user_id: User ID if applicable
     """
+    if DUAL_OBSERVABILITY_AVAILABLE and is_telemetry_initialized():
+        # Use the new application logging system
+        try:
+            from observability.application_logging import log_security_event as new_log_security_event
+            
+            new_log_security_event(
+                message=f"Security event: {event_type}",
+                credential_type=event_type,
+                success=severity.lower() not in ['error', 'critical'],
+                error_type=details.get('error_type') if severity.lower() in ['error', 'critical'] else None
+            )
+            return
+        except Exception as e:
+            # Fallback to legacy logging if new system fails
+            logging.getLogger(__name__).warning(
+                f"Failed to use new application logging system, falling back to legacy: {e}"
+            )
+    
+    # Legacy fallback using structlog
     logger = get_logger(__name__).bind(
         event_type="security",
         security_event=event_type,
@@ -644,7 +734,7 @@ def log_security_event(
 
 
 class ConversationLogger:
-    """Context manager for conversation-specific logging."""
+    """Context manager for conversation-specific logging with dual observability support."""
     
     def __init__(
         self,
@@ -664,9 +754,27 @@ class ConversationLogger:
         self.user_id = user_id
         self.session_id = session_id or str(uuid.uuid4())
         self.logger = None
+        self._use_new_system = DUAL_OBSERVABILITY_AVAILABLE and is_telemetry_initialized()
     
     def __enter__(self) -> FilteringBoundLogger:
         """Enter context and return bound logger."""
+        if self._use_new_system:
+            try:
+                # Use the new chat observability ConversationLogger
+                from observability.chat_observability import ConversationLogger as NewConversationLogger
+                self._new_logger = NewConversationLogger(
+                    conversation_id=self.conversation_id,
+                    user_id=self.user_id,
+                    session_id=self.session_id
+                )
+                return self._new_logger.__enter__()
+            except Exception as e:
+                logging.getLogger(__name__).warning(
+                    f"Failed to use new conversation logger, falling back to legacy: {e}"
+                )
+                self._use_new_system = False
+        
+        # Legacy fallback
         self.logger = get_logger(__name__).bind(
             conversation_id=self.conversation_id,
             user_id=self.user_id,
@@ -676,7 +784,11 @@ class ConversationLogger:
     
     def __exit__(self, exc_type, exc_val, exc_tb):
         """Exit context."""
-        if exc_type:
+        if self._use_new_system and hasattr(self, '_new_logger'):
+            return self._new_logger.__exit__(exc_type, exc_val, exc_tb)
+        
+        # Legacy fallback
+        if exc_type and self.logger:
             self.logger.error(
                 "Conversation context error",
                 exception=str(exc_val),
@@ -690,6 +802,10 @@ class ConversationLogger:
         metadata: Optional[Dict[str, Any]] = None
     ) -> None:
         """Log a conversation message."""
+        if self._use_new_system and hasattr(self, '_new_logger'):
+            return self._new_logger.log_message(role, content, metadata)
+        
+        # Legacy fallback
         log_conversation_event(
             event="message",
             conversation_id=self.conversation_id,

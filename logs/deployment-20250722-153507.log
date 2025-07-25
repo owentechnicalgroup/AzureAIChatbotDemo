@@ -1,0 +1,21 @@
+2025-07-22 15:35:07 ℹ️  🚀 Azure OpenAI CLI Chatbot - PowerShell Deployment
+2025-07-22 15:35:07 ℹ️  Starting deployment for environment: dev
+2025-07-22 15:35:07 ℹ️  Target location: East US
+2025-07-22 15:35:07 ℹ️  Checking prerequisites...
+2025-07-22 15:35:07 ✅ Terraform is available
+2025-07-22 15:35:07 ✅ Azure CLI is available
+2025-07-22 15:35:07 ✅ Azure CLI is authenticated as: mowen@MoKnowsTech.onmicrosoft.com
+2025-07-22 15:35:07 ℹ️  Using subscription: Azure subscription 1 (dce7ee6c-47c0-495d-8dad-c6b0a884cbed)
+2025-07-22 15:35:08 ✅ Prerequisites check passed
+2025-07-22 15:35:08 ℹ️  Setting up Terraform backend storage...
+2025-07-22 15:35:08 ℹ️  Backend configuration:
+2025-07-22 15:35:08 ℹ️    Resource Group: tfstate-rg-dev
+2025-07-22 15:35:08 ℹ️    Storage Account: tfstatedevulknmwzt20250722
+2025-07-22 15:35:08 ℹ️    Container: tfstate
+2025-07-22 15:35:08 ℹ️    Location: East US
+2025-07-22 15:35:08 ℹ️  Creating resource group: tfstate-rg-dev
+2025-07-22 15:35:13 ℹ️  Creating storage account: tfstatedevulknmwzt20250722
+2025-07-22 15:35:17 ❌ Backend storage setup failed: Failed to create storage account
+2025-07-22 15:35:17 ❌ ❌ Deployment failed: Failed to create storage account
+2025-07-22 15:35:17 ❌ Check the log file for details: C:\Users\owenm\OneDrive - Mo Knows Tech\context-engineering-intro\logs\deployment-20250722-153507.log
+2025-07-22 15:35:17 ❌ Failed after 00:00:10

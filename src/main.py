@@ -39,6 +39,17 @@ from utils.console import create_console, get_console
 from utils.error_handlers import handle_error, format_error_for_user
 from utils.logging_helpers import log_startup_event, StructuredLogger
 
+# Import dual observability system
+try:
+    from observability.telemetry_service import (
+        initialize_dual_observability, 
+        is_telemetry_initialized,
+        shutdown_telemetry
+    )
+    DUAL_OBSERVABILITY_AVAILABLE = True
+except ImportError:
+    DUAL_OBSERVABILITY_AVAILABLE = False
+
 # Initialize logger
 logger = structlog.get_logger(__name__).bind(log_type="SYSTEM")
 
@@ -50,6 +61,7 @@ class GlobalContext:
         self.settings: Optional[Settings] = None
         self.console: Optional[Console] = None
         self.debug: bool = False
+        self.dual_observability_initialized: bool = False
         
     def init_settings(self, config_file: Optional[str] = None, debug: bool = False):
         """Initialize application settings."""
@@ -68,7 +80,57 @@ class GlobalContext:
             
             self.settings = get_settings()
             
-            # Setup logging
+            # Initialize dual observability system BEFORE other logging setup
+            if DUAL_OBSERVABILITY_AVAILABLE:
+                try:
+                    log_startup_event(
+                        message="Initializing dual observability system",
+                        component="telemetry",
+                        success=True
+                    )
+                    
+                    self.dual_observability_initialized = initialize_dual_observability(self.settings)
+                    
+                    if self.dual_observability_initialized:
+                        log_startup_event(
+                            message="Dual observability system initialized successfully",
+                            component="telemetry",
+                            success=True
+                        )
+                    else:
+                        log_startup_event(
+                            message="Dual observability system initialization failed",
+                            component="telemetry",
+                            success=False,
+                            error_type="InitializationError"
+                        )
+                        logger.warning(
+                            "Dual observability system failed to initialize - continuing with legacy logging",
+                            fallback_mode=True
+                        )
+                        
+                except Exception as e:
+                    log_startup_event(
+                        message=f"Error initializing dual observability: {str(e)}",
+                        component="telemetry",
+                        success=False,
+                        error_type=type(e).__name__
+                    )
+                    logger.error(
+                        "Failed to initialize dual observability system",
+                        error=str(e),
+                        error_type=type(e).__name__,
+                        fallback_mode=True
+                    )
+                    self.dual_observability_initialized = False
+            else:
+                logger.warning(
+                    "Dual observability system not available - using legacy logging",
+                    reason="Import failed or dependencies missing"
+                )
+                self.dual_observability_initialized = False
+            
+            # Setup logging (now with dual observability if available)
             setup_logging(self.settings)
             
             # Initialize console
@@ -86,9 +148,12 @@ class GlobalContext:
             )
             
             if debug:
+                config_validation = self.settings.validate_configuration()
                 logger.info(
                     "Application initialized in debug mode",
-                    config_validation=self.settings.validate_configuration()
+                    config_validation=config_validation,
+                    dual_observability_enabled=self.dual_observability_initialized,
+                    telemetry_initialized=is_telemetry_initialized() if DUAL_OBSERVABILITY_AVAILABLE else False
                 )
             
         except Exception as e:
@@ -260,7 +325,7 @@ def chat(
             session_id=session_id
         )
         
-        # Validate configuration
+        # Validate configuration including dual observability
         config_validation = settings.validate_configuration()
         if not config_validation['configuration_complete']:
             console.print_error("Configuration incomplete. Please check your settings.")
@@ -270,6 +335,14 @@ def chat(
                 missing_items.append("Azure OpenAI configuration")
             if not config_validation['logging_configured']:
                 missing_items.append("Logging configuration")
+            if not config_validation.get('dual_observability_configured', True):
+                missing_items.append("Dual observability configuration")
+            
+            # Show dual observability status
+            if not ctx.dual_observability_initialized:
+                console.print_status("⚠️  Dual observability not initialized (using legacy logging)", "warning")
+            else:
+                console.print_status("✅ Dual observability system active", "info")
             
             console.print_status(f"Missing: {', '.join(missing_items)}", "warning")
             
@@ -441,6 +514,11 @@ def health(click_ctx, output_format: str):
         health_results = {
             'configuration': config_validation,
             'azure_openai': None,
+            'dual_observability': {
+                'available': DUAL_OBSERVABILITY_AVAILABLE,
+                'initialized': ctx.dual_observability_initialized,
+                'telemetry_active': is_telemetry_initialized() if DUAL_OBSERVABILITY_AVAILABLE else False
+            },
             'overall_status': 'unknown'
         }
         
@@ -460,6 +538,7 @@ def health(click_ctx, output_format: str):
             config_validation['configuration_complete'] and
             (health_results['azure_openai'] is None or 
              health_results['azure_openai']['status'] == 'healthy')
+            # Note: Dual observability is optional - don't fail health check if not available
         )
         
         health_results['overall_status'] = 'healthy' if overall_healthy else 'unhealthy'
@@ -475,19 +554,30 @@ def health(click_ctx, output_format: str):
                 {'Component': 'Azure OpenAI Config', 'Status': '✅' if config_validation['azure_openai_configured'] else '❌'},
                 {'Component': 'Logging Config', 'Status': '✅' if config_validation['logging_configured'] else '❌'},
                 {'Component': 'Key Vault Config', 'Status': '✅' if config_validation['key_vault_configured'] else '❌'},
+                {'Component': 'Dual Observability', 'Status': '✅' if health_results['dual_observability']['initialized'] else '⚠️' if health_results['dual_observability']['available'] else '❌'},
             ]
             
             console.print_table(config_table, title="Configuration Status")
             
             # Service health
+            service_table = []
+            
             if health_results['azure_openai']:
                 azure_status = health_results['azure_openai']
-                service_table = [
+                service_table.extend([
                     {'Service': 'Azure OpenAI', 'Status': azure_status['status'].title()},
                     {'Service': 'Response Time', 'Status': f"{azure_status.get('response_time', 'N/A')}s"},
                     {'Service': 'Endpoint', 'Status': azure_status.get('endpoint', 'N/A')[:50]},
-                ]
-                
+                ])
+            
+            # Add dual observability status
+            dual_obs = health_results['dual_observability']
+            service_table.extend([
+                {'Service': 'Dual Observability', 'Status': 'Active' if dual_obs['initialized'] else 'Legacy Mode'},
+                {'Service': 'Telemetry Status', 'Status': 'Active' if dual_obs['telemetry_active'] else 'Inactive'},
+            ])
+            
+            if service_table:
                 console.print_table(service_table, title="Service Health")
             
             # Overall status
@@ -500,6 +590,11 @@ def health(click_ctx, output_format: str):
         else:  # text format
             click.echo(f"Overall Status: {health_results['overall_status'].upper()}")
             click.echo(f"Configuration Complete: {'Yes' if config_validation['configuration_complete'] else 'No'}")
+            
+            # Dual observability status
+            dual_obs = health_results['dual_observability']
+            dual_status = 'ACTIVE' if dual_obs['initialized'] else 'LEGACY' if dual_obs['available'] else 'UNAVAILABLE'
+            click.echo(f"Dual Observability: {dual_status}")
             
             if health_results['azure_openai']:
                 azure_status = health_results['azure_openai']
@@ -532,6 +627,8 @@ def config(click_ctx):
             {'Setting': 'Azure OpenAI API Version', 'Value': settings.azure_openai_api_version},
             {'Setting': 'Key Vault URL', 'Value': settings.key_vault_url or 'Not configured'},
             {'Setting': 'Log File Path', 'Value': settings.log_file_path},
+            {'Setting': 'Dual Observability', 'Value': 'Active' if ctx.dual_observability_initialized else 'Legacy Mode'},
+            {'Setting': 'Chat Observability', 'Value': 'Enabled' if settings.enable_chat_observability else 'Disabled'},
         ]
         
         console.print_table(config_info, title="Current Configuration")
@@ -693,6 +790,19 @@ if __name__ == '__main__':
         # Run CLI
         cli()
         
+    except KeyboardInterrupt:
+        # Graceful shutdown on Ctrl+C
+        click.echo("\n👋 Goodbye!", err=True)
+        
     except Exception as e:
         click.echo(f"Fatal error: {str(e)}", err=True)
         sys.exit(1)
+        
+    finally:
+        # Graceful shutdown of telemetry services
+        if DUAL_OBSERVABILITY_AVAILABLE and ctx.dual_observability_initialized:
+            try:
+                shutdown_telemetry()
+            except Exception as e:
+                # Don't fail on shutdown errors
+                pass

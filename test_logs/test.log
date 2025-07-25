@@ -1,0 +1,2 @@
+2025-07-25 14:13:00,052 - services.logging_service - INFO - timestamp='2025-07-25T18:13:00.052212Z' level='info' event='Logging configured' format='json' file_path='test_logs/test.log' handlers=3 application_insights_enabled=True logger='services.logging_service'
+2025-07-25 14:13:00,052 - __main__ - INFO - timestamp='2025-07-25T18:13:00.052366Z' level='info' event='This message should appear in both console and file' logger='__main__'

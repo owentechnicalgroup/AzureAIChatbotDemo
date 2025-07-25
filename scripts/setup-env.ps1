@@ -286,8 +286,18 @@ KEY_VAULT_URL=$($TerraformOutputs.KEY_VAULT_URL)
 # APPLICATION INSIGHTS CONFIGURATION
 # =============================================================================
 
-# Application Insights connection string for telemetry
+# Application Insights connection string for application/infrastructure telemetry
 APPLICATIONINSIGHTS_CONNECTION_STRING=$($TerraformOutputs.APPLICATIONINSIGHTS_CONNECTION_STRING)
+
+# Chat Observability connection string for conversation/user experience telemetry
+# Note: If not set, will fallback to APPLICATIONINSIGHTS_CONNECTION_STRING
+CHAT_OBSERVABILITY_CONNECTION_STRING=$($TerraformOutputs.CHAT_OBSERVABILITY_CONNECTION_STRING)
+
+# Enable dual observability (separate workspaces for app vs chat logs)
+ENABLE_CHAT_OBSERVABILITY=$($TerraformOutputs.ENABLE_CHAT_OBSERVABILITY)
+
+# Enable cross-correlation between application and chat observability systems
+ENABLE_CROSS_CORRELATION=$($TerraformOutputs.ENABLE_CROSS_CORRELATION)
 
 # =============================================================================
 # APPLICATION CONFIGURATION
