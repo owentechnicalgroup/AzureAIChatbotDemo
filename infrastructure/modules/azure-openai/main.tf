@@ -45,6 +45,25 @@ resource "azurerm_cognitive_deployment" "gpt4" {
   depends_on = [azurerm_cognitive_account.openai]
 }
 
+# Text Embedding Model Deployment
+resource "azurerm_cognitive_deployment" "embedding" {
+  name                 = var.embedding_deployment_name
+  cognitive_account_id = azurerm_cognitive_account.openai.id
+  
+  model {
+    format  = "OpenAI"
+    name    = var.embedding_model_name
+    version = var.embedding_model_version
+  }
+  
+  scale {
+    type     = var.embedding_scale_type
+    capacity = var.embedding_capacity  # TPM (Tokens Per Minute) limit
+  }
+  
+  depends_on = [azurerm_cognitive_account.openai]
+}
+
 # Log Analytics Workspace for monitoring
 resource "azurerm_log_analytics_workspace" "main" {
   name                = var.log_analytics_name
@@ -160,6 +179,18 @@ resource "azurerm_key_vault_secret" "openai_endpoint" {
 resource "azurerm_key_vault_secret" "gpt4_deployment" {
   name         = "gpt4-deployment-name"
   value        = azurerm_cognitive_deployment.gpt4.name
+  key_vault_id = azurerm_key_vault.main.id
+  
+  depends_on = [
+    azurerm_key_vault.main,
+    azurerm_role_assignment.deployer_keyvault_access,
+    null_resource.rbac_propagation_wait
+  ]
+}
+
+resource "azurerm_key_vault_secret" "embedding_deployment" {
+  name         = "embedding-deployment-name"
+  value        = azurerm_cognitive_deployment.embedding.name
   key_vault_id = azurerm_key_vault.main.id
   
   depends_on = [

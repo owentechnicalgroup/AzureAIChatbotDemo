@@ -377,6 +377,107 @@ class ChromaDBManager:
             )
             raise
     
+    async def delete_document_by_filename(self, filename: str) -> bool:
+        """
+        Delete all chunks from a specific document by filename.
+        
+        Args:
+            filename: Name of the file to delete
+            
+        Returns:
+            True if deletion was successful
+        """
+        try:
+            self.logger.info(f"Deleting document by filename: {filename}")
+            
+            # Get all documents for this filename
+            documents = await self.list_documents(filter_metadata={"filename": filename})
+            
+            if not documents:
+                self.logger.warning(f"No documents found with filename: {filename}")
+                return True
+            
+            # Extract document IDs
+            doc_ids = [doc["id"] for doc in documents]
+            
+            self.logger.info(
+                f"Found {len(doc_ids)} chunks for document {filename}",
+                chunk_ids=doc_ids
+            )
+            
+            # Delete all chunks
+            success = await self.delete_documents(doc_ids)
+            
+            if success:
+                self.logger.info(f"Successfully deleted document: {filename}")
+            
+            return success
+            
+        except Exception as e:
+            self.logger.error(
+                f"Failed to delete document by filename: {filename}",
+                error=str(e)
+            )
+            raise
+    
+    async def get_documents_summary(self) -> List[Dict[str, Any]]:
+        """
+        Get a summary of all documents in the database grouped by filename.
+        
+        Returns:
+            List of document summaries with metadata
+        """
+        try:
+            # Get all documents
+            all_documents = await self.list_documents()
+            
+            # Group by filename
+            doc_summary = {}
+            
+            for doc in all_documents:
+                metadata = doc.get('metadata', {})
+                filename = metadata.get('filename', 'Unknown')
+                
+                if filename not in doc_summary:
+                    doc_summary[filename] = {
+                        'filename': filename,
+                        'file_type': metadata.get('file_type', 'unknown'),
+                        'chunk_count': 0,
+                        'size_bytes': metadata.get('file_size', 0),
+                        'upload_timestamp': metadata.get('upload_timestamp', 'Unknown'),
+                        'document_id': metadata.get('document_id', 'Unknown'),
+                        'chunk_ids': []
+                    }
+                
+                doc_summary[filename]['chunk_count'] += 1
+                doc_summary[filename]['chunk_ids'].append(doc['id'])
+                
+                # Use the largest size found (should be the same for all chunks)
+                if 'file_size' in metadata:
+                    doc_summary[filename]['size_bytes'] = max(
+                        doc_summary[filename]['size_bytes'], 
+                        metadata.get('file_size', 0)
+                    )
+            
+            # Convert to list and sort by upload timestamp
+            summary_list = list(doc_summary.values())
+            summary_list.sort(key=lambda x: x['upload_timestamp'], reverse=True)
+            
+            self.logger.info(
+                "Generated documents summary",
+                unique_documents=len(summary_list),
+                total_chunks=sum(doc['chunk_count'] for doc in summary_list)
+            )
+            
+            return summary_list
+            
+        except Exception as e:
+            self.logger.error(
+                "Failed to get documents summary",
+                error=str(e)
+            )
+            raise
+    
     async def get_document_count(self) -> int:
         """
         Get the total number of documents in the collection.

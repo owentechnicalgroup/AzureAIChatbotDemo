@@ -25,3 +25,12 @@ __pycache__
 
 # Ignore examples folder (external repositories)
 examples/
+
+# ChromaDB data directory - ignore all contents except .gitkeep
+data/chromadb/*
+!data/chromadb/.gitkeep
+
+# Streamlit secrets and local config
+.streamlit/secrets.toml
+.streamlit/credentials.toml
+.streamlit/config.toml.local

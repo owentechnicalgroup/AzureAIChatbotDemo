@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """
-Azure OpenAI CLI Chatbot - Main Entry Point
-Task 19: Click-based CLI interface with command groups and Rich integration.
+RAG-Enabled Chatbot - Main Entry Point
+Updated to launch Streamlit web interface as primary UI, replacing CLI interface.
+Legacy CLI interface preserved for backwards compatibility.
 """
 
 import sys
@@ -38,6 +39,13 @@ from chatbot.prompts import SystemPrompts
 from utils.console import create_console, get_console
 from utils.error_handlers import handle_error, format_error_for_user
 from utils.logging_helpers import log_startup_event, StructuredLogger
+
+# Import Streamlit app for new primary interface
+try:
+    from ui.streamlit_app import main as streamlit_main
+    STREAMLIT_AVAILABLE = True
+except ImportError:
+    STREAMLIT_AVAILABLE = False
 
 # Import dual observability system
 try:
@@ -191,16 +199,18 @@ ctx = GlobalContext()
 )
 @click.option('--debug', is_flag=True, help='Enable debug mode')
 @click.option('--version', is_flag=True, help='Show version information')
+@click.option('--cli', is_flag=True, help='Force CLI mode instead of Streamlit')
 @click.pass_context
-def cli(click_ctx, config_file: Optional[str], log_level: str, debug: bool, version: bool):
+def cli(click_ctx, config_file: Optional[str], log_level: str, debug: bool, version: bool, cli: bool):
     """
-    Azure OpenAI CLI Chatbot
+    RAG-Enabled Chatbot
     
-    A comprehensive CLI chatbot powered by Azure OpenAI and LangChain.
+    A comprehensive chatbot with RAG capabilities powered by Azure OpenAI and ChromaDB.
+    By default, launches Streamlit web interface. Use --cli to force CLI mode.
     """
     if version:
-        click.echo("Azure OpenAI CLI Chatbot v1.0.0")
-        click.echo("Powered by Azure OpenAI and LangChain")
+        click.echo("RAG-Enabled Chatbot v2.0.0")
+        click.echo("Powered by Azure OpenAI, ChromaDB, and Streamlit")
         return
     
     # Initialize global context
@@ -218,9 +228,12 @@ def cli(click_ctx, config_file: Optional[str], log_level: str, debug: bool, vers
         logger.error("Failed to initialize CLI", error=str(e))
         raise click.ClickException(f"Initialization failed: {str(e)}")
     
-    # If no command is specified, run interactive chat
+    # If no command is specified, launch Streamlit by default (unless --cli is specified)
     if click_ctx.invoked_subcommand is None:
-        click_ctx.invoke(chat)
+        if cli:
+            click_ctx.invoke(chat)
+        else:
+            click_ctx.invoke(streamlit)
 
 
 @cli.command()
@@ -780,6 +793,122 @@ def show_conversation(click_ctx, conversation_file: str, output_format: str):
     
     except Exception as e:
         console.print_error(f"Failed to show conversation: {str(e)}")
+
+
+@cli.command()
+@click.option(
+    '--port',
+    type=int,
+    default=8501,
+    help='Port to run Streamlit on (default: 8501)'
+)
+@click.option(
+    '--host',
+    type=str,
+    default='localhost',
+    help='Host to bind Streamlit to (default: localhost)'
+)
+@click.pass_context
+def streamlit(click_ctx, port: int, host: str):
+    """Launch the Streamlit web interface (default interface)."""
+    console = click_ctx.obj['console']
+    settings = click_ctx.obj['settings']
+    debug = click_ctx.obj['debug']
+    
+    if not STREAMLIT_AVAILABLE:
+        console.print_error("Streamlit interface is not available. Please install streamlit and related dependencies.")
+        raise click.ClickException("Streamlit not available")
+    
+    try:
+        console.print_status("🚀 Starting RAG-Enabled Chatbot Web Interface", "info")
+        console.print_status("⚡ Upload documents and start chatting!", "info")
+        console.print_status("🛑 Press Ctrl+C to stop the server", "info")
+        
+        if debug:
+            console.print_status("Debug mode enabled", "info")
+        
+        # Update settings with Streamlit configuration
+        if hasattr(settings, 'streamlit_port'):
+            settings.streamlit_port = port
+        
+        log_startup_event(
+            message="Starting Streamlit web interface",
+            component="streamlit",
+            success=True
+        )
+        
+        # Launch Streamlit app
+        try:
+            # Try to launch Streamlit programmatically first
+            import subprocess
+            import sys
+            import socket
+            
+            # Find an available port starting from the requested port
+            def find_available_port(start_port, max_attempts=10):
+                for attempt in range(max_attempts):
+                    test_port = start_port + attempt
+                    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+                        try:
+                            s.bind((host, test_port))
+                            return test_port
+                        except OSError:
+                            continue
+                return None
+            
+            # Find available port
+            available_port = find_available_port(port)
+            if available_port is None:
+                raise Exception(f"No available ports found starting from {port}")
+            
+            if available_port != port:
+                console.print_status(f"Port {port} is busy, using port {available_port}", "warning")
+                port = available_port
+            
+            # Get the path to the streamlit app
+            streamlit_app_path = str(Path(__file__).parent / "ui" / "streamlit_app.py")
+            
+            # Launch streamlit run command
+            cmd = [
+                sys.executable, "-m", "streamlit", "run", 
+                streamlit_app_path,
+                "--server.port", str(port),
+                "--server.headless", "true",
+                "--server.address", host
+            ]
+            
+            if debug:
+                console.print_status(f"Running command: {' '.join(cmd)}", "info")
+            
+            # Update the console message with the actual port
+            console.print_status(f"📱 Access the app at: http://{host}:{port}", "info")
+            
+            # Run Streamlit
+            subprocess.run(cmd, check=True)
+            
+        except subprocess.CalledProcessError as e:
+            console.print_error(f"Failed to start Streamlit: {str(e)}")
+            console.print_status("Trying alternative launch method...", "info")
+            
+            # Fallback: try to run Streamlit app directly
+            os.environ['STREAMLIT_SERVER_PORT'] = str(port)
+            os.environ['STREAMLIT_SERVER_ADDRESS'] = host
+            streamlit_main()
+            
+    except KeyboardInterrupt:
+        console.print_status("👋 Streamlit server stopped by user", "info")
+        
+    except Exception as e:
+        error = handle_error(e)
+        console.print_error(f"Failed to start Streamlit interface: {error}")
+        
+        if debug:
+            import traceback
+            traceback.print_exc()
+        
+        # Fallback to CLI chat
+        console.print_status("Falling back to CLI interface...", "warning")
+        click_ctx.invoke(chat)
 
 
 if __name__ == '__main__':

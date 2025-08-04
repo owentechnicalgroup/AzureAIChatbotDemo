@@ -109,6 +109,62 @@ variable "gpt4_scale_type" {
   }
 }
 
+# Text Embedding Model Configuration
+variable "embedding_model_name" {
+  description = "The text embedding model name to deploy"
+  type        = string
+  default     = "text-embedding-ada-002"
+  
+  validation {
+    condition     = contains(["text-embedding-ada-002", "text-embedding-3-small", "text-embedding-3-large"], var.embedding_model_name)
+    error_message = "Embedding model must be one of: text-embedding-ada-002, text-embedding-3-small, text-embedding-3-large."
+  }
+}
+
+variable "embedding_model_version" {
+  description = "The text embedding model version to deploy"
+  type        = string
+  default     = "2"
+  
+  validation {
+    condition     = length(var.embedding_model_version) > 0
+    error_message = "Embedding model version must be specified (e.g., 2, 1)."
+  }
+}
+
+variable "embedding_deployment_name" {
+  description = "The name for the text embedding deployment"
+  type        = string
+  default     = "text-embedding-ada-002"
+  
+  validation {
+    condition     = length(var.embedding_deployment_name) >= 2 && length(var.embedding_deployment_name) <= 64
+    error_message = "Embedding deployment name must be between 2 and 64 characters."
+  }
+}
+
+variable "embedding_capacity" {
+  description = "The capacity (TPM) for the embedding deployment"
+  type        = number
+  default     = 10
+  
+  validation {
+    condition     = var.embedding_capacity >= 1 && var.embedding_capacity <= 1000
+    error_message = "Embedding capacity must be between 1 and 1000 TPM."
+  }
+}
+
+variable "embedding_scale_type" {
+  description = "The scale type for the embedding deployment"
+  type        = string
+  default     = "GlobalStandard"
+  
+  validation {
+    condition     = contains(["Standard", "GlobalStandard", "ProvisionedManaged"], var.embedding_scale_type)
+    error_message = "Embedding scale type must be one of: Standard, GlobalStandard, ProvisionedManaged."
+  }
+}
+
 # Key Vault Configuration
 variable "key_vault_name" {
   description = "The name of the Key Vault"

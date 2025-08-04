@@ -66,6 +66,27 @@ output "gpt4_model_version" {
   value       = azurerm_cognitive_deployment.gpt4.model[0].version
 }
 
+# Text Embedding Deployment Information
+output "embedding_deployment_name" {
+  description = "The name of the text embedding deployment"
+  value       = azurerm_cognitive_deployment.embedding.name
+}
+
+output "embedding_deployment_id" {
+  description = "The ID of the text embedding deployment"
+  value       = azurerm_cognitive_deployment.embedding.id
+}
+
+output "embedding_model_name" {
+  description = "The text embedding model name"
+  value       = azurerm_cognitive_deployment.embedding.model[0].name
+}
+
+output "embedding_model_version" {
+  description = "The text embedding model version"
+  value       = azurerm_cognitive_deployment.embedding.model[0].version
+}
+
 # Key Vault Information
 output "key_vault_name" {
   description = "The name of the Key Vault"
@@ -96,6 +117,11 @@ output "openai_endpoint_secret_id" {
 output "gpt4_deployment_secret_id" {
   description = "The Key Vault secret ID for the GPT-4 deployment name"
   value       = azurerm_key_vault_secret.gpt4_deployment.id
+}
+
+output "embedding_deployment_secret_id" {
+  description = "The Key Vault secret ID for the embedding deployment name"
+  value       = azurerm_key_vault_secret.embedding_deployment.id
 }
 
 output "application_insights_connection_string_secret_id" {
@@ -223,13 +249,14 @@ output "managed_identity_principal_id" {
 output "app_config" {
   description = "Configuration values for application environment"
   value = {
-    azure_openai_endpoint    = azurerm_cognitive_account.openai.endpoint
-    azure_openai_deployment = azurerm_cognitive_deployment.gpt4.name
-    key_vault_url           = azurerm_key_vault.main.vault_uri
-    app_insights_key        = azurerm_application_insights.main.instrumentation_key
-    storage_account_name    = azurerm_storage_account.main.name
-    resource_group_name     = azurerm_resource_group.main.name
-    location               = azurerm_resource_group.main.location
+    azure_openai_endpoint      = azurerm_cognitive_account.openai.endpoint
+    azure_openai_deployment   = azurerm_cognitive_deployment.gpt4.name
+    azure_embedding_deployment = azurerm_cognitive_deployment.embedding.name
+    key_vault_url             = azurerm_key_vault.main.vault_uri
+    app_insights_key          = azurerm_application_insights.main.instrumentation_key
+    storage_account_name      = azurerm_storage_account.main.name
+    resource_group_name       = azurerm_resource_group.main.name
+    location                  = azurerm_resource_group.main.location
   }
   sensitive = true
 }

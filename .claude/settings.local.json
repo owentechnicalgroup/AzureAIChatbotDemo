@@ -19,7 +19,11 @@
       "WebFetch(domain:docs.anthropic.com)",
       "Bash(rm:*)",
       "Bash(git add:*)",
-      "Bash(git restore:*)"
+      "Bash(git restore:*)",
+      "WebFetch(domain:docs.trychroma.com)",
+      "WebFetch(domain:python.langchain.com)",
+      "WebFetch(domain:docs.streamlit.io)",
+      "Bash(pip install:*)"
     ],
     "deny": []
   }

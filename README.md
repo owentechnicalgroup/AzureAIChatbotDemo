@@ -31,7 +31,7 @@ cd Context-Engineering-Intro
 /execute-prp PRPs/your-feature-name.md
 ```
 
-### For Azure OpenAI Chatbot Deployment
+### For Azure OpenAI RAG Chatbot Deployment
 
 ```powershell
 # 1. Prerequisites
@@ -56,14 +56,20 @@ pip install -r requirements.txt
 # 6. Fix DNS issues if pip fails (corporate network remnants)
 .\scripts\fix-dns.ps1 -Force
 
-# 7. Run the chatbot (with virtual environment activated)
-python src\main.py chat
+# 7. Launch the RAG-enabled Streamlit web interface (recommended)
+python src\main.py
+# Or explicitly: python src\main.py streamlit
+
+# 8. Alternative: Use CLI interface for backwards compatibility
+python src\main.py --cli chat
 ```
 
 ## 📚 Table of Contents
 
 - [What is Context Engineering?](#what-is-context-engineering)
-- [Azure OpenAI Chatbot](#azure-openai-chatbot)
+- [RAG-Enabled Azure OpenAI Chatbot](#rag-enabled-azure-openai-chatbot)
+- [RAG Features](#rag-features)
+- [Streamlit Web Interface](#streamlit-web-interface)
 - [Template Structure](#template-structure)
 - [What's Included](#whats-included)
 - [Step-by-Step Guide](#step-by-step-guide)
@@ -80,9 +86,12 @@ python src\main.py chat
 - **Claude Code Integration**: Pre-configured commands for AI-assisted development
 - **Multi-Agent Workflow**: Example showing how to coordinate multiple AI agents
 
-### 🚀 Azure OpenAI Chatbot
+### 🚀 RAG-Enabled Azure OpenAI Chatbot
 
-- **Production-Ready Chatbot**: CLI-based chatbot using Azure OpenAI GPT-4
+- **RAG Integration**: Retrieval-Augmented Generation with ChromaDB vector storage
+- **Modern Web Interface**: Streamlit-based UI with document upload and chat features
+- **Document Processing**: Support for PDF, DOCX, and TXT files with intelligent chunking
+- **CLI Interface**: Legacy command-line interface preserved for backwards compatibility
 - **Infrastructure as Code**: Complete Terraform configuration for Azure deployment
 - **Secure Architecture**: Key Vault integration, managed identities, and RBAC
 - **Deployment Automation**: PowerShell scripts for bootstrap and deployment
@@ -307,14 +316,67 @@ Context Engineering represents a paradigm shift from traditional prompt engineer
 3. **Enables Complex Features**: AI can handle multi-step implementations with proper context
 4. **Self-Correcting**: Validation loops allow AI to fix its own mistakes
 
-## Azure OpenAI Chatbot
+## RAG-Enabled Azure OpenAI Chatbot
 
-This repository includes a complete Azure OpenAI chatbot implementation using Infrastructure as Code (Terraform) and PowerShell deployment scripts. The chatbot demonstrates best practices for:
+This repository includes a complete RAG-enabled Azure OpenAI chatbot with both modern web interface and traditional CLI access. The implementation demonstrates best practices for:
 
+- **Retrieval-Augmented Generation** using ChromaDB vector database
+- **Modern web interface** using Streamlit with document upload capabilities  
 - **Secure Azure OpenAI deployment** with Key Vault integration
 - **Infrastructure as Code** using Terraform with proper state management
 - **RBAC and security** following Azure best practices
 - **Modular architecture** with separation of concerns
+
+## RAG Features
+
+### 🔍 Document Processing & Retrieval
+
+- **Multi-format Support**: Process PDF, DOCX, and TXT documents
+- **Intelligent Chunking**: Smart text segmentation with configurable overlap
+- **Vector Storage**: ChromaDB integration with persistent local storage
+- **Semantic Search**: Azure OpenAI embeddings for document similarity matching
+- **Source Attribution**: Track and cite document sources in responses
+
+### 🤖 AI-Powered Chat
+
+- **Context-Aware Responses**: Leverage retrieved document chunks for accurate answers
+- **Confidence Scoring**: Assess and display confidence levels for responses
+- **Token Management**: Track and optimize token usage across operations
+- **Error Handling**: Graceful degradation when documents or services are unavailable
+- **Conversation Memory**: Maintain chat history within sessions
+
+### ⚙️ Configuration & Customization
+
+- **Retrieval Parameters**: Adjust chunk count, similarity thresholds, and search filters
+- **Processing Limits**: Configure file size limits and chunk sizes
+- **UI Customization**: Streamlit theming and component configuration
+- **Logging Integration**: Comprehensive structured logging with Azure Application Insights
+
+## Streamlit Web Interface
+
+### 📱 Modern User Experience
+
+- **Document Upload**: Drag-and-drop interface for multiple file types
+- **Real-time Processing**: Progress indicators and status updates
+- **Interactive Chat**: Modern chat interface with message history
+- **Source Display**: Expandable source references with document citations
+- **Responsive Design**: Works on desktop and mobile devices
+
+### 🛠️ Management Features
+
+- **Document Library**: View, manage, and delete uploaded documents
+- **System Status**: Real-time health monitoring and metrics
+- **Settings Panel**: Adjust retrieval parameters and preferences
+- **Session Management**: Persistent conversation state
+- **Error Handling**: User-friendly error messages and recovery options
+
+### 🎨 Customization Options
+
+- **Theming**: Configurable colors, fonts, and layout options
+- **Component Control**: Show/hide sources, adjust sidebar behavior
+- **Performance Tuning**: Optimize for different deployment scenarios
+- **Authentication**: Ready for future auth integration
+- **Configuration**: Flexible settings via TOML files and environment variables
 
 ### Architecture Overview
 
@@ -325,15 +387,38 @@ Azure Infrastructure:
 │   ├── Resource group for backend
 │   └── RBAC permissions for deployer
 ├── Main Infrastructure (infrastructure/)
-│   ├── Azure OpenAI service
+│   ├── Azure OpenAI service (GPT-4 + embeddings)
 │   ├── Key Vault for secure configuration
 │   ├── Storage account for conversation history
 │   ├── Application Insights for monitoring
 │   └── Optional App Service for web deployment
-└── Application (src/)
-    ├── CLI chatbot implementation
-    ├── Conversation management
-    └── Azure service integrations
+└── RAG-Enabled Application (src/)
+    ├── Streamlit Web Interface (ui/)
+    │   ├── Document upload and management
+    │   ├── Interactive chat interface
+    │   └── Real-time status monitoring
+    ├── RAG Processing Engine (rag/)
+    │   ├── Document processor (PDF/DOCX/TXT)
+    │   ├── ChromaDB vector store
+    │   └── Retrieval and generation
+    ├── Legacy CLI Interface (main.py)
+    │   ├── Command-line chatbot
+    │   ├── Health monitoring
+    │   └── Configuration management
+    └── Core Services
+        ├── Azure OpenAI client
+        ├── Logging and observability
+        └── Configuration management
+
+Local Storage:
+├── ChromaDB Vector Database (data/chromadb/)
+│   ├── Document embeddings
+│   ├── Metadata and sources
+│   └── Persistent storage
+└── Configuration (.streamlit/)
+    ├── UI themes and settings
+    ├── Security configuration
+    └── Performance tuning
 ```
 
 ### Prerequisites
@@ -387,11 +472,34 @@ pip install -r requirements.txt
 # Test the deployment
 python src\main.py health
 
-# Start chatting
-python src\main.py chat
+# Launch Streamlit web interface (recommended)
+python src\main.py
+# Interface available at: http://localhost:8501
+
+# Alternative: Start CLI chat (legacy)
+python src\main.py --cli chat
+
+# Alternative: Use specific Streamlit command with custom port
+python src\main.py streamlit --port 8502 --host 0.0.0.0
 ```
 
 ### Key Features
+
+**🔍 RAG & Document Intelligence**
+
+- Multi-format document processing (PDF, DOCX, TXT)
+- ChromaDB vector database with local persistence
+- Intelligent text chunking and embedding
+- Semantic search with confidence scoring
+- Source attribution and citation tracking
+
+**🖥️ Modern Web Interface**
+
+- Streamlit-based responsive web UI
+- Real-time document upload and processing
+- Interactive chat with message history
+- Configurable retrieval parameters
+- System health monitoring dashboard
 
 **🔒 Security First**
 
@@ -399,6 +507,7 @@ python src\main.py chat
 - Managed Identity for secure authentication
 - RBAC with least-privilege access
 - HTTPS-only storage accounts
+- Local vector storage with gitignore protection
 
 **🏗️ Infrastructure as Code**
 
@@ -410,16 +519,18 @@ python src\main.py chat
 **📊 Monitoring & Observability**
 
 - Application Insights integration
-- Structured logging
+- Structured logging with log types
 - Health check endpoints
-- Conversation tracking
+- Conversation and performance tracking
+- RAG-specific metrics and debugging
 
 **🚀 Production Ready**
 
-- Error handling and retry logic
-- Conversation persistence
+- Error handling and graceful degradation
+- Conversation persistence and memory
 - Rate limiting awareness
 - Scalable architecture
+- CLI backwards compatibility
 
 ### Customization
 
@@ -525,8 +636,16 @@ context-engineering-intro/
 │   ├── destroy.ps1          # Destroy infrastructure
 │   └── setup-env.ps1        # Set up Python environment
 ├── src/
-│   ├── main.py              # CLI entry point
-│   ├── chatbot/            # Chatbot implementation
+│   ├── main.py              # Entry point (Streamlit + CLI)
+│   ├── ui/                  # Streamlit web interface
+│   │   └── streamlit_app.py # Main Streamlit application
+│   ├── rag/                 # RAG processing engine
+│   │   ├── document_processor.py  # Document parsing and chunking
+│   │   ├── vector_store.py         # ChromaDB integration
+│   │   └── retriever.py           # RAG retrieval and generation
+│   ├── chatbot/            # Chatbot implementations
+│   │   ├── agent.py        # Legacy CLI chatbot
+│   │   └── rag_agent.py    # RAG-enabled chatbot
 │   ├── config/             # Configuration management
 │   ├── services/           # Azure service clients
 │   └── utils/              # Utility functions
@@ -534,15 +653,27 @@ context-engineering-intro/
 │   ├── templates/
 │   │   └── prp_base.md       # Base template for PRPs
 │   └── EXAMPLE_multi_agent_prp.md  # Example of a complete PRP
+├── data/
+│   └── chromadb/            # ChromaDB vector database storage
+├── .streamlit/              # Streamlit configuration
+│   ├── config.toml          # Main Streamlit settings
+│   ├── secrets.toml         # Secrets template (gitignored)
+│   └── README.md           # Configuration documentation
+├── tests/                   # Comprehensive unit tests
+│   ├── test_document_processor.py
+│   ├── test_chromadb_manager.py
+│   ├── test_rag_retriever.py
+│   ├── test_rag_chatbot_agent.py
+│   └── test_streamlit_app.py
 ├── examples/                  # Your code examples (critical!)
 ├── CLAUDE.md                 # Global rules for AI assistant
 ├── INITIAL.md               # Template for feature requests
 ├── INITIAL_EXAMPLE.md       # Example feature request
-├── requirements.txt         # Python dependencies
+├── requirements.txt         # Python dependencies (includes RAG deps)
 └── README.md                # This file
 ```
 
-This template doesn't focus on RAG and tools with context engineering because I have a LOT more in store for that soon. ;)
+This template now includes a complete RAG implementation demonstrating how Context Engineering principles can be applied to build sophisticated AI-powered document processing systems.
 
 ## Step-by-Step Guide
 

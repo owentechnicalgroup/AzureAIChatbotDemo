@@ -61,8 +61,13 @@ class Settings(BaseSettings):
         env='AZURE_OPENAI_DEPLOYMENT',
         description="Azure OpenAI deployment name"
     )
+    azure_embedding_deployment: Optional[str] = Field(
+        None,
+        env='AZURE_EMBEDDING_DEPLOYMENT',
+        description="Azure OpenAI embedding deployment name"
+    )
     azure_openai_api_version: str = Field(
-        "2024-05-01-preview",
+        "2024-08-01-preview",
         env='AZURE_OPENAI_API_VERSION',
         description="Azure OpenAI API version"
     )
@@ -177,6 +182,55 @@ class Settings(BaseSettings):
         "dev",
         env='ENVIRONMENT',
         description="Deployment environment (dev, staging, prod)"
+    )
+    
+    # RAG Configuration
+    chromadb_storage_path: str = Field(
+        "./data/chromadb",
+        env='CHROMADB_STORAGE_PATH',
+        description="Local ChromaDB storage directory path"
+    )
+    enable_rag: bool = Field(
+        True,
+        env='ENABLE_RAG',
+        description="Enable RAG (Retrieval-Augmented Generation) functionality"
+    )
+    
+    # Document Processing Configuration
+    chunk_size: int = Field(
+        1000,
+        ge=100,
+        le=2000,
+        env='DOCUMENT_CHUNK_SIZE',
+        description="Text chunk size for document processing"
+    )
+    chunk_overlap: int = Field(
+        200,
+        ge=0,
+        le=500,
+        env='DOCUMENT_CHUNK_OVERLAP',
+        description="Text chunk overlap for document processing"
+    )
+    max_file_size_mb: int = Field(
+        100,
+        ge=1,
+        le=500,
+        env='MAX_FILE_SIZE_MB',
+        description="Maximum file size for document uploads (MB)"
+    )
+    
+    # Streamlit Configuration
+    streamlit_port: int = Field(
+        8501,
+        ge=1024,
+        le=65535,
+        env='STREAMLIT_PORT',
+        description="Streamlit application port"
+    )
+    streamlit_host: str = Field(
+        "localhost",
+        env='STREAMLIT_HOST',
+        description="Streamlit application host"
     )
     
     # Feature Flags
@@ -310,6 +364,14 @@ class Settings(BaseSettings):
             )
             if deployment != self.azure_openai_deployment:
                 self.azure_openai_deployment = deployment
+                secrets_loaded += 1
+            
+            # Azure embedding deployment name
+            embedding_deployment = self._get_secret_or_fallback(
+                client, "embedding-deployment-name", self.azure_embedding_deployment
+            )
+            if embedding_deployment != self.azure_embedding_deployment:
+                self.azure_embedding_deployment = embedding_deployment
                 secrets_loaded += 1
             
             # Application Insights connection string
@@ -526,6 +588,12 @@ class Settings(BaseSettings):
 
 # Global settings instance
 _settings: Optional[Settings] = None
+
+
+def clear_settings_cache():
+    """Clear the global settings cache to force reload."""
+    global _settings
+    _settings = None
 
 
 def get_settings(reload: bool = False) -> Settings:

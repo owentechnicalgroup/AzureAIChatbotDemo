@@ -9,6 +9,7 @@ import sys
 from pathlib import Path
 from typing import List, Optional, Dict, Any
 import uuid
+from datetime import datetime
 
 import streamlit as st
 import structlog
@@ -110,9 +111,9 @@ class StreamlitRAGApp:
             if uploaded_files:
                 self._handle_file_upload(uploaded_files)
             
-            # Document list section
-            st.subheader("Uploaded Documents")
-            self._render_document_list()
+            # Document management section
+            st.subheader("📋 Document Database")
+            self._render_document_database()
             
             # Retrieval settings
             st.subheader("⚙️ Settings")
@@ -193,57 +194,172 @@ class StreamlitRAGApp:
             progress_bar.empty()
             status_text.empty()
             
-            st.success(f"Successfully processed {total_files} documents!")
+            # Use toast notification for document upload success
+            st.toast(f"📄 Successfully processed {total_files} documents!", icon="✅")
             st.rerun()
             
         except Exception as e:
-            st.error(f"Error processing documents: {str(e)}")
+            # Use toast notification for document upload errors
+            st.toast(f"❌ Error processing documents: {str(e)}", icon="🚨")
             self.logger.error(
                 "Document processing failed in Streamlit",
                 error=str(e)
             )
     
-    def _render_document_list(self):
-        """Render the list of uploaded documents."""
-        if not st.session_state.uploaded_documents:
-            st.info("No documents uploaded yet.")
-            return
-        
-        for doc in st.session_state.uploaded_documents:
-            with st.container():
-                col1, col2 = st.columns([3, 1])
-                
-                with col1:
-                    st.write(f"📄 **{doc['filename']}**")
-                    st.caption(f"{doc['chunk_count']} chunks • {doc['file_type'].upper()}")
-                
-                with col2:
-                    if st.button("🗑️", key=f"delete_{doc['id']}", help="Delete document"):
-                        self._delete_document(doc['id'])
-        
-        # Document count summary
-        total_docs = len(st.session_state.uploaded_documents)
-        total_chunks = sum(doc['chunk_count'] for doc in st.session_state.uploaded_documents)
-        st.caption(f"**Total: {total_docs} documents, {total_chunks} chunks**")
-    
-    def _delete_document(self, document_id: str):
-        """Delete a document from the system."""
+    def _render_document_database(self):
+        """Render the comprehensive document database management interface."""
         try:
-            # Remove from uploaded documents list
-            st.session_state.uploaded_documents = [
-                doc for doc in st.session_state.uploaded_documents 
-                if doc['id'] != document_id
-            ]
+            # Get documents from ChromaDB
+            documents = asyncio.run(st.session_state.chromadb_manager.get_documents_summary())
             
-            # TODO: Remove from ChromaDB (would need to track chunk IDs)
-            # For now, we'll just remove from the UI list
-            # In a full implementation, we'd need to track chunk IDs per document
+            if not documents:
+                st.info("No documents in database yet. Upload some documents to get started!")
+                return
             
-            st.success("Document removed from list!")
-            st.rerun()
+            # Show refresh button
+            col1, col2 = st.columns([1, 3])
+            with col1:
+                if st.button("🔄 Refresh", help="Refresh document list"):
+                    st.rerun()
+            
+            # Documents table
+            st.write("**Documents in ChromaDB:**")
+            
+            for doc in documents:
+                with st.container():
+                    # Create expandable section for each document
+                    with st.expander(f"📄 {doc['filename']} ({doc['chunk_count']} chunks)"):
+                        col1, col2 = st.columns([3, 1])
+                        
+                        with col1:
+                            # Document details
+                            st.write(f"**Filename:** {doc['filename']}")
+                            st.write(f"**Type:** {doc['file_type'].upper()}")
+                            st.write(f"**Chunks:** {doc['chunk_count']}")
+                            
+                            # Size formatting
+                            size_mb = doc['size_bytes'] / (1024 * 1024) if doc['size_bytes'] > 0 else 0
+                            st.write(f"**Size:** {size_mb:.2f} MB")
+                            
+                            # Upload timestamp formatting
+                            upload_time = doc['upload_timestamp']
+                            if upload_time != 'Unknown':
+                                try:
+                                    if isinstance(upload_time, str):
+                                        # Try to parse ISO format
+                                        dt = datetime.fromisoformat(upload_time.replace('Z', '+00:00'))
+                                        upload_time = dt.strftime("%Y-%m-%d %H:%M:%S")
+                                except:
+                                    pass  # Keep original format if parsing fails
+                            
+                            st.write(f"**Uploaded:** {upload_time}")
+                            st.write(f"**Document ID:** {doc['document_id']}")
+                        
+                        with col2:
+                            # Delete button
+                            delete_key = f"delete_db_{doc['filename']}_{doc['document_id']}"
+                            if st.button("🗑️ Delete", key=delete_key, help="Delete this document from database"):
+                                self._delete_document_from_database(doc['filename'])
+            
+            # Summary statistics
+            total_docs = len(documents)
+            total_chunks = sum(doc['chunk_count'] for doc in documents)
+            total_size = sum(doc['size_bytes'] for doc in documents) / (1024 * 1024)
+            
+            st.divider()
+            
+            col1, col2, col3 = st.columns(3)
+            with col1:
+                st.metric("Documents", total_docs)
+            with col2:
+                st.metric("Total Chunks", total_chunks)
+            with col3:
+                st.metric("Total Size", f"{total_size:.1f} MB")
+            
+            # Danger zone - clear all documents
+            with st.expander("⚠️ Danger Zone"):
+                st.warning("**Warning:** This will delete ALL documents from the database!")
+                if st.button("🗑️ Delete All Documents", type="secondary"):
+                    if st.session_state.get('confirm_delete_all', False):
+                        self._delete_all_documents()
+                    else:
+                        st.session_state.confirm_delete_all = True
+                        st.info("Click again to confirm deletion of ALL documents.")
+                        st.rerun()
+                
+                if st.session_state.get('confirm_delete_all', False):
+                    if st.button("❌ Cancel", type="primary"):
+                        st.session_state.confirm_delete_all = False
+                        st.rerun()
             
         except Exception as e:
-            st.error(f"Error deleting document: {str(e)}")
+            st.error(f"Error loading document database: {str(e)}")
+            self.logger.error("Error rendering document database", error=str(e))
+    
+    def _delete_document_from_database(self, filename: str):
+        """Delete a document from ChromaDB database."""
+        try:
+            with st.spinner(f"Deleting {filename}..."):
+                # Delete from ChromaDB
+                success = asyncio.run(st.session_state.chromadb_manager.delete_document_by_filename(filename))
+                
+                if success:
+                    # Use toast notification for success - much more readable!
+                    st.toast(f"✅ Successfully deleted {filename}!", icon="🗑️")
+                    
+                    # Also remove from session state if it exists
+                    st.session_state.uploaded_documents = [
+                        doc for doc in st.session_state.uploaded_documents 
+                        if doc.get('filename') != filename
+                    ]
+                    
+                    # Reset confirmation state
+                    if 'confirm_delete_all' in st.session_state:
+                        del st.session_state.confirm_delete_all
+                    
+                    st.rerun()
+                else:
+                    # Use toast notification for failure
+                    st.toast(f"❌ Failed to delete {filename}", icon="⚠️")
+            
+        except Exception as e:
+            # Use toast notification for errors
+            st.toast(f"⚠️ Error deleting {filename}: {str(e)}", icon="🚨")
+            self.logger.error("Error deleting document from database", filename=filename, error=str(e))
+    
+    def _delete_all_documents(self):
+        """Delete all documents from ChromaDB database."""
+        try:
+            with st.spinner("Deleting all documents..."):
+                # Get all documents first
+                documents = asyncio.run(st.session_state.chromadb_manager.get_documents_summary())
+                
+                deleted_count = 0
+                for doc in documents:
+                    try:
+                        success = asyncio.run(st.session_state.chromadb_manager.delete_document_by_filename(doc['filename']))
+                        if success:
+                            deleted_count += 1
+                    except Exception as e:
+                        self.logger.error(f"Failed to delete {doc['filename']}", error=str(e))
+                
+                # Clear session state
+                st.session_state.uploaded_documents = []
+                st.session_state.confirm_delete_all = False
+                
+                if deleted_count > 0:
+                    # Use toast notification for bulk delete success
+                    st.toast(f"🗑️ Successfully deleted {deleted_count} documents!", icon="✅")
+                else:
+                    # Use toast notification for no deletion
+                    st.toast("⚠️ No documents were deleted", icon="📭")
+                
+                st.rerun()
+            
+        except Exception as e:
+            # Use toast notification for bulk delete errors
+            st.toast(f"🚨 Error deleting documents: {str(e)}", icon="❌")
+            self.logger.error("Error deleting all documents", error=str(e))
     
     def _render_settings(self):
         """Render retrieval settings."""
