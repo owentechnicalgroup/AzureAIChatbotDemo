@@ -1,0 +1,103 @@
+# Streamlit Configuration for RAG-Enabled Chatbot
+# This file configures the Streamlit application settings
+
+[global]
+# Development or production mode
+developmentMode = false
+
+# Data directory removed - deprecated option
+
+# Show warning when run in development mode
+showWarningOnDirectExecution = false
+
+[server]
+# Port to run the server on (can be overridden by command line)
+port = 8501
+
+# Address to bind to
+address = "localhost"
+
+# Enable CORS (must be true when XSRF protection is enabled)
+enableCORS = true
+
+# Enable XSS protection
+enableXsrfProtection = true
+
+# Max upload size in MB (matches our document processor limit)
+maxUploadSize = 10
+
+# Run the server in headless mode (no browser auto-open)
+headless = false
+
+# Base URL path (useful for reverse proxies)
+baseUrlPath = ""
+
+# Enable websocket compression
+enableWebsocketCompression = true
+
+[browser]
+# Automatically open browser on startup
+gatherUsageStats = false
+
+# Server address to use when opening browser
+serverAddress = "localhost"
+
+# Server port to use when opening browser  
+serverPort = 8501
+
+[theme]
+# Primary color scheme
+primaryColor = "#FF6B6B"
+
+# Background color
+backgroundColor = "#FFFFFF"
+
+# Secondary background color (sidebar, etc)
+secondaryBackgroundColor = "#F0F2F6"
+
+# Text color
+textColor = "#262730"
+
+# Font family
+font = "sans serif"
+
+[client]
+# Show error details in production
+showErrorDetails = true
+
+# Toolbar mode
+toolbarMode = "viewer"
+
+[logger]
+# Logging level
+level = "info"
+
+# Enable message cache
+messageFormat = "%(asctime)s.%(msecs)03d %(name)s: %(levelname)s: %(message)s"
+
+# Deprecated options removed
+
+# Mapbox configuration removed - deprecated
+
+# Sharing, S3, and GCS sections removed - deprecated options
+
+[runner]
+# Run the app in debug mode
+magicEnabled = true
+
+# installTracer and fixMatplotlib removed - deprecated options
+
+# Post script run behavior
+postScriptGC = true
+
+# Fast rerun behavior
+fastReruns = true
+
+# Enforce serializable session state
+enforceSerializableSessionState = false
+
+[ui]
+# Hide the main menu
+hideTopBar = false
+
+# hideFooter, hideSidebarNav, and experimental options removed - deprecated
