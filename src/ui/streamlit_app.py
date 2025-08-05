@@ -23,6 +23,13 @@ from rag.vector_store import ChromaDBManager
 from rag.retriever import RAGRetriever
 from rag import RAGQuery
 
+# Import tools for dashboard (with error handling)
+try:
+    from tools import ToolRegistry, RestaurantRatingsTool
+    TOOLS_AVAILABLE = True
+except ImportError:
+    TOOLS_AVAILABLE = False
+
 # Configure structured logging
 logger = structlog.get_logger(__name__)
 
@@ -45,10 +52,10 @@ class StreamlitRAGApp:
         
         # Configure page
         st.set_page_config(
-            page_title="RAG-Enabled Chatbot",
+            page_title="RAG-Enabled Chatbot with Tools",
             page_icon="🤖",
             layout="wide",
-            initial_sidebar_state="expanded"
+            initial_sidebar_state="collapsed"
         )
         
     def _initialize_session_state(self):
@@ -93,6 +100,13 @@ class StreamlitRAGApp:
         
         if "score_threshold" not in st.session_state:
             st.session_state.score_threshold = 0.2  # Lower threshold for better retrieval
+        
+        if "use_general_knowledge" not in st.session_state:
+            st.session_state.use_general_knowledge = False
+        
+        # Navigation state
+        if "current_page" not in st.session_state:
+            st.session_state.current_page = "chat"
     
     def render_sidebar(self):
         """Render the sidebar with document upload and management."""
@@ -385,6 +399,12 @@ class StreamlitRAGApp:
             value=st.session_state.show_sources,
             help="Display source documents in responses"
         )
+        
+        st.session_state.use_general_knowledge = st.checkbox(
+            "Use AI General Knowledge",
+            value=st.session_state.use_general_knowledge,
+            help="Allow AI to use general knowledge when document context is insufficient"
+        )
     
     def _render_system_status(self):
         """Render system status information."""
@@ -451,7 +471,8 @@ class StreamlitRAGApp:
                         query=prompt,
                         k=st.session_state.retrieval_k,
                         score_threshold=st.session_state.score_threshold,
-                        include_sources=st.session_state.show_sources
+                        include_sources=st.session_state.show_sources,
+                        use_general_knowledge=st.session_state.use_general_knowledge
                     )
                     
                     # Generate response
@@ -536,17 +557,97 @@ class StreamlitRAGApp:
         Built with Streamlit, ChromaDB, and Azure OpenAI.
         """)
     
+    def render_navigation(self):
+        """Render main navigation tabs."""
+        # Main navigation - tabs automatically handle page switching
+        tab1, tab2, tab3 = st.tabs(["💬 Chat", "🔧 Tools", "📚 Documents"])
+        
+        with tab1:
+            self.render_chat_page()
+        
+        with tab2:
+            self.render_tools_page()
+        
+        with tab3:
+            self.render_documents_page()
+    
+    def render_chat_page(self):
+        """Render the main chat interface page."""
+        # Header controls
+        self.render_header()
+        
+        # Sidebar for chat page
+        with st.sidebar:
+            st.title("⚙️ Chat Settings")
+            self._render_settings()
+            
+            st.divider()
+            
+            st.title("📊 System Status")
+            self._render_system_status()
+        
+        # Main chat interface
+        self.render_main_chat()
+    
+    def render_tools_page(self):
+        """Render the tools dashboard page."""
+        # Import tools dashboard
+        try:
+            from pages.tools_dashboard import ToolsDashboard
+            
+            # Initialize and render tools dashboard
+            tools_dashboard = ToolsDashboard(self.settings)
+            tools_dashboard.render()
+            
+        except ImportError as e:
+            st.error(f"Failed to load tools dashboard: {str(e)}")
+            st.info("Make sure the tools dashboard components are properly installed.")
+        except Exception as e:
+            st.error(f"Error rendering tools dashboard: {str(e)}")
+            self.logger.error("Tools dashboard error", error=str(e))
+    
+    def render_documents_page(self):
+        """Render the documents management page."""
+        st.title("📚 Document Manager")
+        st.caption("Upload, manage, and monitor your document knowledge base")
+        
+        # Document upload section
+        st.subheader("📤 Upload Documents")
+        self._render_document_upload()
+        
+        st.divider()
+        
+        # Document database management
+        st.subheader("📋 Document Database")
+        self._render_document_database()
+    
+    def _render_document_upload(self):
+        """Render document upload interface."""
+        uploaded_files = st.file_uploader(
+            "Choose files to upload",
+            accept_multiple_files=True,
+            type=['pdf', 'docx', 'txt'],
+            help="Upload PDF, DOCX, or TXT files to chat with your documents"
+        )
+        
+        if uploaded_files:
+            # Check if files are already uploaded
+            new_files = []
+            for file in uploaded_files:
+                if file.name not in [doc["filename"] for doc in st.session_state.uploaded_documents]:
+                    new_files.append(file)
+            
+            if new_files:
+                if st.button("📤 Process Documents", key="process_docs_page"):
+                    self._process_uploaded_files(new_files)
+            else:
+                st.info("All selected files are already uploaded.")
+    
     def run(self):
         """Run the main Streamlit application."""
         try:
-            # Render header controls
-            self.render_header()
-            
-            # Render sidebar
-            self.render_sidebar()
-            
-            # Render main chat interface
-            self.render_main_chat()
+            # Render main navigation with content directly in tabs
+            self.render_navigation()
             
         except Exception as e:
             st.error(f"Application error: {str(e)}")

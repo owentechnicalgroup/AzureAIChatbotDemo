@@ -182,7 +182,8 @@ class RAGChatbotAgent:
         user_message: str,
         retrieval_k: int = 3,
         score_threshold: float = 0.5,
-        include_sources: bool = True
+        include_sources: bool = True,
+        use_general_knowledge: bool = False
     ) -> Dict[str, Any]:
         """
         Process user message with RAG and generate response.
@@ -221,7 +222,8 @@ class RAGChatbotAgent:
                     query=user_message,
                     k=retrieval_k,
                     score_threshold=score_threshold,
-                    include_sources=include_sources
+                    include_sources=include_sources,
+                    use_general_knowledge=use_general_knowledge
                 )
                 
                 # Generate RAG response

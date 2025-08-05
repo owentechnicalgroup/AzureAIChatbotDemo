@@ -56,8 +56,7 @@ class RAGRetriever:
         # Initialize Azure OpenAI client for generation
         self.azure_client = AzureOpenAIClient(settings)
         
-        # Configure system prompt for RAG responses
-        self.system_prompt = self._create_system_prompt()
+        # Note: system prompt is now created dynamically based on query parameters
         
         # Initialize LangChain components
         self._llm = None
@@ -68,9 +67,30 @@ class RAGRetriever:
             azure_endpoint=settings.azure_openai_endpoint
         )
     
-    def _create_system_prompt(self) -> str:
-        """Create system prompt for RAG responses."""
-        return """You are a helpful AI assistant that answers questions based on provided document context.
+    def _create_system_prompt(self, use_general_knowledge: bool = False) -> str:
+        """Create system prompt for RAG responses.
+        
+        Args:
+            use_general_knowledge: Whether to allow AI to use general knowledge as fallback
+        """
+        if use_general_knowledge:
+            return """You are a helpful AI assistant that answers questions based on provided document context.
+
+INSTRUCTIONS:
+1. First, try to answer using only the provided document context
+2. If the context is insufficient, you may supplement with general knowledge as a fallback
+3. Always be clear about your sources:
+   - For context: "According to [source name]..." or "Based on the information in [source name]..."
+   - For general knowledge: "Based on general knowledge (not from your documents)..." or "From what I know generally..."
+4. Prefer document context over general knowledge when both are available
+5. Be concise but comprehensive in your responses
+6. If multiple documents contain relevant information, synthesize the information coherently
+
+When combining sources, clearly separate document-based information from general knowledge.
+
+Context will be provided below, followed by the user's question."""
+        else:
+            return """You are a helpful AI assistant that answers questions based on provided document context.
 
 INSTRUCTIONS:
 1. Use only the information provided in the context to answer questions
@@ -217,7 +237,8 @@ Context will be provided below, followed by the user's question."""
             # Generate response using Azure OpenAI
             response_text, token_usage = await self._generate_response_with_context(
                 query=rag_query.query,
-                context=context
+                context=context,
+                use_general_knowledge=rag_query.use_general_knowledge
             )
             
             # Calculate confidence score based on retrieval scores
@@ -260,7 +281,8 @@ Context will be provided below, followed by the user's question."""
     async def _generate_response_with_context(
         self, 
         query: str, 
-        context: str
+        context: str,
+        use_general_knowledge: bool = False
     ) -> Tuple[str, Dict[str, int]]:
         """
         Generate response using Azure OpenAI with provided context.
@@ -268,24 +290,18 @@ Context will be provided below, followed by the user's question."""
         Args:
             query: User query
             context: Retrieved document context
+            use_general_knowledge: Whether to allow general knowledge fallback
             
         Returns:
             Tuple of (response_text, token_usage)
         """
         try:
-            # Create prompt with context
-            full_prompt = f"""{self.system_prompt}
-
-CONTEXT:
-{context}
-
-QUESTION: {query}
-
-Please provide a comprehensive answer based on the context above. Remember to cite your sources."""
+            # Create dynamic system prompt based on settings
+            system_prompt = self._create_system_prompt(use_general_knowledge)
             
             # Use the existing Azure OpenAI client for consistency
             messages = [
-                {"role": "system", "content": self.system_prompt},
+                {"role": "system", "content": system_prompt},
                 {"role": "user", "content": f"Context: {context}\n\nQuestion: {query}"}
             ]
             

@@ -41,6 +41,7 @@ class RAGQuery(BaseModel):
     k: int = Field(default=3, description="Number of chunks to retrieve")
     score_threshold: float = Field(default=0.2, description="Minimum similarity score")
     include_sources: bool = Field(default=True, description="Include source references")
+    use_general_knowledge: bool = Field(default=False, description="Allow AI to use general knowledge as fallback")
 
 class RAGResponse(BaseModel):
     """RAG response with sources and metadata."""
