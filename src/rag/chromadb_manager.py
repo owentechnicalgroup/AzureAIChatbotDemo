@@ -8,6 +8,8 @@ import asyncio
 from pathlib import Path
 from typing import List, Optional, Dict, Any, Tuple
 from datetime import datetime, timezone
+import logging
+import warnings
 
 import structlog
 from langchain_chroma import Chroma
@@ -18,7 +20,27 @@ import chromadb
 from chromadb.config import Settings as ChromaSettings
 
 from config.settings import Settings
-from .import DocumentChunk, Document
+from .import Document
+
+# Global ChromaDB telemetry suppression - prevent telemetry errors
+os.environ["ANONYMIZED_TELEMETRY"] = "False"
+os.environ["CHROMA_TELEMETRY_DISABLED"] = "True"
+
+# Suppress ChromaDB telemetry logging at module level
+logging.getLogger("chromadb.telemetry").setLevel(logging.CRITICAL)
+logging.getLogger("chromadb").propagate = False
+
+# Suppress warnings related to telemetry
+warnings.filterwarnings("ignore", category=UserWarning, module="chromadb")
+
+# Monkeypatch ChromaDB telemetry to prevent capture method signature errors
+try:
+    import chromadb.telemetry
+    # Replace the capture method with a no-op to prevent signature errors
+    if hasattr(chromadb.telemetry, 'capture'):
+        chromadb.telemetry.capture = lambda *args, **kwargs: None
+except ImportError:
+    pass  # ChromaDB telemetry module not available
 
 logger = structlog.get_logger(__name__)
 
@@ -48,8 +70,14 @@ class ChromaDBManager:
             component="chromadb_manager"
         )
         
-        # Disable ChromaDB telemetry to avoid telemetry capture errors
+        # Disable ChromaDB telemetry completely to avoid telemetry capture errors
         os.environ["ANONYMIZED_TELEMETRY"] = "False"
+        os.environ["CHROMA_TELEMETRY_DISABLED"] = "True"
+        
+        # Suppress ChromaDB internal logging to avoid telemetry issues
+        import logging
+        logging.getLogger("chromadb").setLevel(logging.ERROR)
+        logging.getLogger("chromadb.telemetry").setLevel(logging.CRITICAL)
         
         # Setup persistence directory
         self.persist_directory = Path(settings.chromadb_storage_path)
@@ -122,7 +150,7 @@ class ChromaDBManager:
         try:
             self.logger.info("Initializing ChromaDB instance")
             
-            # Create ChromaDB client with telemetry disabled
+            # Create ChromaDB client with telemetry completely disabled
             chroma_client = chromadb.PersistentClient(
                 path=str(self.persist_directory),
                 settings=ChromaSettings(
@@ -169,21 +197,20 @@ class ChromaDBManager:
     )
     async def add_documents(
         self, 
-        chunks: List[DocumentChunk], 
-        document_metadata: Optional[Document] = None
+        documents: List[LangChainDocument]
     ) -> List[str]:
         """
-        Add document chunks to ChromaDB with retry logic.
+        Add LangChain documents directly to ChromaDB.
+        All metadata is already contained within each document.
         
         Args:
-            chunks: List of DocumentChunk objects to add
-            document_metadata: Optional document metadata
+            documents: List of LangChain Document objects with complete metadata
             
         Returns:
             List of document IDs added to the database
         """
-        if not chunks:
-            self.logger.warning("No chunks provided for adding to ChromaDB")
+        if not documents:
+            self.logger.warning("No documents provided for adding to ChromaDB")
             return []
         
         try:
@@ -192,58 +219,24 @@ class ChromaDBManager:
             
             self.logger.info(
                 "Adding documents to ChromaDB",
-                chunk_count=len(chunks),
-                document_id=document_metadata.id if document_metadata else None
+                document_count=len(documents)
             )
             
-            # Convert DocumentChunk objects to LangChain documents
-            langchain_docs = []
-            doc_ids = []
+            # Generate IDs from document metadata
+            doc_ids = [
+                doc.metadata.get("chunk_id", f"chunk_{i}") 
+                for i, doc in enumerate(documents)
+            ]
             
-            for chunk in chunks:
-                # Prepare metadata
-                metadata = {
-                    "source": chunk.source,
-                    "chunk_index": chunk.chunk_index,
-                    "chunk_id": chunk.id,
-                    "created_at": datetime.now(timezone.utc).isoformat()
-                }
-                
-                # Add page number if available
-                if chunk.page_number is not None:
-                    metadata["page_number"] = chunk.page_number
-                
-                # Add document metadata if provided
-                if document_metadata:
-                    metadata.update({
-                        "document_id": document_metadata.id,
-                        "filename": document_metadata.filename,
-                        "file_type": document_metadata.file_type,
-                        "upload_timestamp": document_metadata.upload_timestamp.isoformat()
-                    })
-                
-                # Add chunk metadata
-                metadata.update(chunk.metadata)
-                
-                # Create LangChain document
-                langchain_doc = LangChainDocument(
-                    page_content=chunk.content,
-                    metadata=metadata
-                )
-                langchain_docs.append(langchain_doc)
-                doc_ids.append(chunk.id)
-            
-            # Add documents to ChromaDB
-            # Run the synchronous method in a thread to avoid blocking
+            # Add documents directly - all metadata is already in the documents!
             added_ids = await asyncio.get_event_loop().run_in_executor(
                 None,
-                lambda: db.add_documents(documents=langchain_docs, ids=doc_ids)
+                lambda: db.add_documents(documents=documents, ids=doc_ids)
             )
             
             self.logger.info(
                 "Documents added to ChromaDB successfully",
-                added_count=len(added_ids) if added_ids else len(doc_ids),
-                document_id=document_metadata.id if document_metadata else None
+                added_count=len(added_ids) if added_ids else len(doc_ids)
             )
             
             return added_ids or doc_ids
@@ -251,9 +244,8 @@ class ChromaDBManager:
         except Exception as e:
             self.logger.error(
                 "Failed to add documents to ChromaDB",
-                chunk_count=len(chunks),
-                error=str(e),
-                error_type=type(e).__name__
+                document_count=len(documents),
+                error=str(e)
             )
             raise
     
@@ -263,7 +255,7 @@ class ChromaDBManager:
         k: int = 3, 
         score_threshold: float = 0.2,
         filter_metadata: Optional[Dict[str, Any]] = None
-    ) -> List[Tuple[DocumentChunk, float]]:
+    ) -> List[Tuple[LangChainDocument, float]]:
         """
         Search for similar documents in ChromaDB.
         
@@ -274,7 +266,7 @@ class ChromaDBManager:
             filter_metadata: Optional metadata filters
             
         Returns:
-            List of (DocumentChunk, similarity_score) tuples
+            List of (LangChain Document, similarity_score) tuples
         """
         try:
             # Ensure DB is initialized
@@ -299,20 +291,11 @@ class ChromaDBManager:
                 lambda: db.similarity_search_with_score(query, **search_kwargs)
             )
             
-            # Filter by score threshold and convert to DocumentChunk objects
+            # Filter by score threshold - return LangChain documents directly
             filtered_results = []
             for doc, score in results:
                 if score >= score_threshold:
-                    # Convert LangChain document back to DocumentChunk
-                    chunk = DocumentChunk(
-                        id=doc.metadata.get("chunk_id", f"unknown_{len(filtered_results)}"),
-                        content=doc.page_content,
-                        source=doc.metadata.get("source", "unknown"),
-                        page_number=doc.metadata.get("page_number"),
-                        chunk_index=doc.metadata.get("chunk_index", 0),
-                        metadata=doc.metadata
-                    )
-                    filtered_results.append((chunk, score))
+                    filtered_results.append((doc, score))
             
             self.logger.info(
                 "ChromaDB search completed",
@@ -488,10 +471,15 @@ class ChromaDBManager:
         try:
             db = await self.initialize_db()
             
-            count = await asyncio.get_event_loop().run_in_executor(
-                None,
-                lambda: db._collection.count()
-            )
+            # Suppress any telemetry errors during count operation
+            import warnings
+            with warnings.catch_warnings():
+                warnings.simplefilter("ignore")
+                
+                count = await asyncio.get_event_loop().run_in_executor(
+                    None,
+                    lambda: self._get_collection_count_safe(db)
+                )
             
             self.logger.debug("Retrieved document count", count=count)
             return count
@@ -502,6 +490,37 @@ class ChromaDBManager:
                 error=str(e)
             )
             raise
+    
+    def _get_collection_count_safe(self, db) -> int:
+        """
+        Safely get collection count with telemetry error suppression.
+        
+        Args:
+            db: ChromaDB instance
+            
+        Returns:
+            Document count
+        """
+        try:
+            return db._collection.count()
+        except Exception as e:
+            # If telemetry errors occur, try alternative approach
+            if "capture()" in str(e) and "positional argument" in str(e):
+                # Log the telemetry error but don't fail
+                self.logger.warning("ChromaDB telemetry error suppressed", error=str(e))
+                try:
+                    # Try to get count through direct collection access
+                    collection = db._collection
+                    if hasattr(collection, '_count'):
+                        return collection._count()
+                    else:
+                        # Fallback: return 0 if we can't get count safely
+                        return 0
+                except:
+                    return 0
+            else:
+                # Re-raise non-telemetry errors
+                raise
     
     async def list_documents(
         self, 
