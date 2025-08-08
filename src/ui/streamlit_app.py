@@ -17,11 +17,12 @@ import structlog
 # Add src to path for imports
 sys.path.append(str(Path(__file__).parent.parent))
 
-from config.settings import get_settings, clear_settings_cache
-from rag.document_processor import DocumentProcessor
-from rag.vector_store import ChromaDBManager
-from rag.retriever import RAGRetriever
-from rag import RAGQuery
+from src.config.settings import get_settings, clear_settings_cache
+from src.rag.document_processor import DocumentProcessor
+from src.rag.chromadb_manager import ChromaDBManager
+from src.chatbot.agent import ChatbotAgent
+from src.rag.langchain_tools import LangChainToolRegistry
+from src.rag import RAGQuery
 
 # Import tools for dashboard (with error handling)
 try:
@@ -71,10 +72,20 @@ class StreamlitRAGApp:
         if "chromadb_manager" not in st.session_state:
             st.session_state.chromadb_manager = ChromaDBManager(self.settings)
         
-        if "rag_retriever" not in st.session_state:
-            st.session_state.rag_retriever = RAGRetriever(
+        if "tool_registry" not in st.session_state:
+            st.session_state.tool_registry = LangChainToolRegistry(
                 self.settings, 
-                st.session_state.chromadb_manager
+                enable_dynamic_loading=True
+            )
+        
+        if "chatbot_agent" not in st.session_state:
+            # Get tools from the registry
+            tools = st.session_state.tool_registry.get_tools()
+            
+            st.session_state.chatbot_agent = ChatbotAgent(
+                settings=self.settings,
+                tools=tools,
+                enable_multi_step=True
             )
         
         # Chat state
@@ -172,7 +183,7 @@ class StreamlitRAGApp:
                 file_content = uploaded_file.read()
                 
                 # Process file
-                document, chunks = asyncio.run(
+                chunks = asyncio.run(
                     st.session_state.document_processor.process_file(
                         file_path=Path(uploaded_file.name),
                         file_content=file_content,
@@ -182,22 +193,22 @@ class StreamlitRAGApp:
                 
                 # Add to ChromaDB
                 asyncio.run(
-                    st.session_state.chromadb_manager.add_documents(
-                        chunks=chunks,
-                        document_metadata=document
-                    )
+                    st.session_state.chromadb_manager.add_documents(chunks)
                 )
                 
-                # Update session state
-                st.session_state.uploaded_documents.append({
-                    "id": document.id,
-                    "filename": document.filename,
-                    "file_type": document.file_type,
-                    "size_bytes": document.size_bytes,
-                    "chunk_count": len(chunks),
-                    "upload_time": document.upload_timestamp,
-                    "status": "completed"
-                })
+                # Extract document info from first chunk metadata
+                if chunks:
+                    first_chunk_metadata = chunks[0].metadata
+                    # Update session state
+                    st.session_state.uploaded_documents.append({
+                        "id": first_chunk_metadata.get('document_id'),
+                        "filename": first_chunk_metadata.get('filename'),
+                        "file_type": first_chunk_metadata.get('file_type'),
+                        "size_bytes": first_chunk_metadata.get('file_size'),
+                        "chunk_count": len(chunks),
+                        "upload_time": first_chunk_metadata.get('upload_timestamp'),
+                        "status": "completed"
+                    })
             
             progress_bar.progress(1.0)
             status_text.text("✅ All documents processed successfully!")
@@ -415,8 +426,51 @@ class StreamlitRAGApp:
             st.metric("Documents in DB", doc_count)
             st.metric("Session Messages", len(st.session_state.messages))
             
-            # Health check
-            health = asyncio.run(st.session_state.rag_retriever.health_check())
+            # Show tools status from ChatbotAgent
+            tool_count = len(st.session_state.chatbot_agent.tools) if hasattr(st.session_state.chatbot_agent, 'tools') else 0
+            st.metric("Available Tools", tool_count)
+            
+            # Show enhanced tool registry status with categories
+            if hasattr(st.session_state, 'tool_registry'):
+                registry = st.session_state.tool_registry
+                
+                # Get category summary
+                try:
+                    category_summary = registry.get_category_summary()
+                    
+                    st.success(f"🔧 Dynamic Tools: {category_summary['total_tools']} tools in {category_summary['total_categories']} categories")
+                    
+                    # Show tools by category
+                    for category_name, category_info in category_summary['categories'].items():
+                        tool_count = category_info['tool_count']
+                        tool_names = category_info['tool_names']
+                        
+                        if tool_count > 0:
+                            category_display = category_name.title()
+                            if category_name == 'documents' and category_info.get('has_rag_tool'):
+                                st.success(f"📄 {category_display}: {tool_count} tools ({', '.join(tool_names)})")
+                            elif category_name == 'banking':
+                                st.success(f"🏦 {category_display}: {tool_count} tools ({', '.join(tool_names)})")
+                            else:
+                                st.info(f"⚙️ {category_display}: {tool_count} tools ({', '.join(tool_names)})")
+                    
+                    # Show critical RAG tool status
+                    all_tools = registry.get_tools()
+                    rag_tool_names = [tool.name for tool in all_tools if tool.name == 'document_search']
+                    if rag_tool_names:
+                        st.success("✅ RAG Tool: Registered and available")
+                    else:
+                        st.error("❌ RAG Tool: Not registered (CRITICAL ISSUE)")
+                        
+                except Exception as e:
+                    st.error(f"Tool registry error: {str(e)}")
+                    # Fallback to basic display
+                    langchain_tools = registry.get_tools()
+                    tool_names = [tool.name for tool in langchain_tools]
+                    st.info(f"🔧 Basic Tools: {len(tool_names)} tools ({', '.join(tool_names)})")
+            
+            # Health check via ChatbotAgent (synchronous method)
+            health = st.session_state.chatbot_agent.health_check()
             
             if health["status"] == "healthy":
                 st.success("✅ System Healthy")
@@ -437,14 +491,21 @@ class StreamlitRAGApp:
             with st.chat_message(message["role"]):
                 st.markdown(message["content"])
                 
-                # Show sources if available and enabled
+                # Show processing details if available (assistant messages only)
                 if (message["role"] == "assistant" and 
-                    st.session_state.show_sources and 
-                    message.get("sources")):
+                    message.get("processing_mode")):
                     
-                    with st.expander("📚 Sources", expanded=False):
-                        for source in message["sources"]:
-                            st.caption(f"• {source}")
+                    with st.expander("ℹ️ Response Details", expanded=False):
+                        col1, col2 = st.columns(2)
+                        with col1:
+                            st.metric("Processing Mode", message.get("processing_mode", "unknown"))
+                        with col2:
+                            response_time = message.get("response_time", 0)
+                            st.metric("Response Time", f"{response_time:.2f}s")
+                        
+                        # Show tools used if multi-step
+                        if message.get("processing_mode") == 'multi-step':
+                            st.caption("🔧 AI Agent used available tools to answer this question")
         
         # Chat input
         if prompt := st.chat_input("Ask a question about your documents..."):
@@ -466,44 +527,49 @@ class StreamlitRAGApp:
         with st.chat_message("assistant"):
             with st.spinner("Thinking..."):
                 try:
-                    # Create RAG query
-                    rag_query = RAGQuery(
-                        query=prompt,
-                        k=st.session_state.retrieval_k,
-                        score_threshold=st.session_state.score_threshold,
-                        include_sources=st.session_state.show_sources,
-                        use_general_knowledge=st.session_state.use_general_knowledge
+                    # Generate response using ChatbotAgent
+                    response_data = st.session_state.chatbot_agent.process_message(
+                        user_message=prompt,
+                        conversation_id=st.session_state.conversation_id
                     )
                     
-                    # Generate response
-                    response = asyncio.run(
-                        st.session_state.rag_retriever.generate_rag_response(rag_query)
-                    )
+                    # Extract response text
+                    response_text = response_data.get('content', 'I apologize, but I couldn\'t generate a response.')
                     
                     # Display response
-                    st.markdown(response.answer)
+                    st.markdown(response_text)
                     
-                    # Show sources if available and enabled
-                    if st.session_state.show_sources and response.sources:
-                        with st.expander("📚 Sources", expanded=False):
-                            for source in response.sources:
-                                st.caption(f"• {source}")
+                    # Show processing info if available
+                    processing_mode = response_data.get('processing_mode', 'unknown')
+                    response_time = response_data.get('response_time', 0)
+                    
+                    # Show additional info in expander
+                    with st.expander("ℹ️ Response Details", expanded=False):
+                        col1, col2 = st.columns(2)
+                        with col1:
+                            st.metric("Processing Mode", processing_mode)
+                        with col2:
+                            st.metric("Response Time", f"{response_time:.2f}s")
+                        
+                        # Show tools used if multi-step
+                        if processing_mode == 'multi-step':
+                            st.caption("🔧 AI Agent used available tools to answer your question")
                     
                     # Add assistant message to chat history
                     st.session_state.messages.append({
                         "role": "assistant",
-                        "content": response.answer,
-                        "sources": response.sources,
-                        "confidence_score": response.confidence_score
+                        "content": response_text,
+                        "processing_mode": processing_mode,
+                        "response_time": response_time
                     })
                     
                     # Log the interaction
                     self.logger.info(
-                        "RAG response generated in Streamlit",
+                        "ChatbotAgent response generated in Streamlit",
                         query_length=len(prompt),
-                        response_length=len(response.answer),
-                        source_count=len(response.sources),
-                        confidence_score=response.confidence_score
+                        response_length=len(response_text),
+                        processing_mode=processing_mode,
+                        response_time=response_time
                     )
                     
                 except Exception as e:
@@ -514,8 +580,8 @@ class StreamlitRAGApp:
                     st.session_state.messages.append({
                         "role": "assistant",
                         "content": error_message,
-                        "sources": [],
-                        "confidence_score": 0.0
+                        "processing_mode": "error",
+                        "response_time": 0.0
                     })
                     
                     self.logger.error(
