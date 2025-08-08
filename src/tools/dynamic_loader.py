@@ -414,17 +414,22 @@ class DynamicToolLoader:
         # Load Call Report tools if API is available
         if "call_report_api" in self._available_services:
             try:
-                from src.tools.call_report.langchain_tools import CallReportToolset
+                from src.tools.call_report.langchain_toolset import LangChainCallReportToolset
                 from .categories import add_category_metadata, ToolCategory
                 
-                # Initialize Call Report toolset
-                call_report_toolset = CallReportToolset(self.settings)
-                base_tools = call_report_toolset.get_tools()
+                # Initialize LangChain-native Call Report toolset
+                call_report_toolset = LangChainCallReportToolset(self.settings)
+                langchain_tools = call_report_toolset.get_tools()
                 
-                # Add category metadata to each tool
-                for tool in base_tools:
-                    # Skip if tool is not a LangChain BaseTool
+                # Add category metadata to each LangChain tool
+                for tool in langchain_tools:
+                    # Verify this is a proper LangChain BaseTool
                     if not isinstance(tool, BaseTool):
+                        self.logger.debug(
+                            "Skipping non-LangChain tool",
+                            tool_name=tool.name,
+                            tool_type=type(tool).__name__
+                        )
                         continue
                     
                     # Add banking category metadata
@@ -439,12 +444,13 @@ class DynamicToolLoader:
                     tools.append(tool)
                 
                 self.logger.info(
-                    "Call Report tools loaded successfully",
-                    tool_count=len(tools)
+                    "LangChain Call Report tools loaded successfully",
+                    tool_count=len(tools),
+                    tool_names=[tool.name for tool in tools]
                 )
                 
             except Exception as e:
-                self.logger.error("Failed to load Call Report tools", error=str(e))
+                self.logger.error("Failed to load LangChain Call Report tools", error=str(e))
         
         return tools
     

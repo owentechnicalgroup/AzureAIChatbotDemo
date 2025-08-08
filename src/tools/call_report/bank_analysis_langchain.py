@@ -1,0 +1,292 @@
+"""
+LangChain-compatible Bank Analysis Tool for Call Report queries.
+
+This tool combines bank lookup and Call Report data retrieval into
+intelligent workflows that complete multi-step banking queries using LangChain BaseTool.
+"""
+
+import asyncio
+import json
+from typing import Dict, Any, Optional, List, Type
+from decimal import Decimal
+
+import structlog
+from pydantic import BaseModel, Field
+from langchain.tools import BaseTool
+from langchain.callbacks.manager import (
+    AsyncCallbackManagerForToolRun,
+    CallbackManagerForToolRun,
+)
+
+from .bank_lookup_langchain import BankLookupTool as LangChainBankLookupTool
+from .mock_api_client import CallReportMockAPI
+
+logger = structlog.get_logger(__name__).bind(log_type="SYSTEM")
+
+
+class BankAnalysisInput(BaseModel):
+    """Input schema for bank analysis tool."""
+    bank_name: Optional[str] = Field(default=None, description="Bank name to search for (alternative to rssd_id)")
+    rssd_id: Optional[str] = Field(default=None, description="Bank RSSD ID (alternative to bank_name)")
+    query_type: str = Field(default="basic_info", description="Type of analysis: 'basic_info', 'financial_summary', or 'key_ratios'")
+
+
+class BankAnalysisTool(BaseTool):
+    """
+    LangChain-compatible bank analysis tool that handles complete workflows.
+    
+    Combines bank lookup with Call Report data retrieval to answer
+    common banking queries in a single tool call.
+    """
+    
+    name: str = "bank_analysis"
+    description: str = """Complete banking analysis tool - look up banks and get financial data in one call.
+
+Use this tool for comprehensive banking queries that need financial information.
+Supports multiple query types:
+- basic_info: Bank identification and basic financial data
+- financial_summary: Key financial metrics (assets, deposits, loans)
+- key_ratios: Important financial ratios (ROA, ROE, efficiency)
+
+Either bank_name OR rssd_id is required.
+
+Example: Get basic info for JPMorgan Chase
+- bank_name: "JPMorgan Chase"
+- query_type: "basic_info"
+"""
+    
+    args_schema: Type[BaseModel] = BankAnalysisInput
+    
+    def __init__(self, **kwargs):
+        """Initialize the composite bank analysis tool."""
+        super().__init__(**kwargs)
+        
+        # Initialize component tools - use private attributes to avoid Pydantic conflicts
+        object.__setattr__(self, '_bank_lookup', LangChainBankLookupTool())
+        object.__setattr__(self, '_api_client', CallReportMockAPI())
+        
+        logger.info("BankAnalysisTool initialized")
+    
+    @property
+    def bank_lookup(self) -> LangChainBankLookupTool:
+        """Get the bank lookup tool."""
+        return getattr(self, '_bank_lookup')
+    
+    @property 
+    def api_client(self) -> CallReportMockAPI:
+        """Get the API client."""
+        return getattr(self, '_api_client')
+    
+    def _run(
+        self,
+        bank_name: Optional[str] = None,
+        rssd_id: Optional[str] = None,
+        query_type: str = "basic_info",
+        run_manager: Optional[CallbackManagerForToolRun] = None,
+    ) -> str:
+        """Synchronous execution."""
+        try:
+            # Try to get the current event loop
+            loop = asyncio.get_running_loop()
+            # If we're in an event loop, we need to handle this differently
+            import concurrent.futures
+            
+            # Create a new event loop in a thread pool
+            with concurrent.futures.ThreadPoolExecutor() as executor:
+                future = executor.submit(
+                    lambda: asyncio.run(self._arun(bank_name, rssd_id, query_type, run_manager))
+                )
+                return future.result()
+                
+        except RuntimeError:
+            # No event loop running, safe to use asyncio.run
+            return asyncio.run(self._arun(bank_name, rssd_id, query_type, run_manager))
+    
+    async def _arun(
+        self,
+        bank_name: Optional[str] = None,
+        rssd_id: Optional[str] = None,
+        query_type: str = "basic_info",
+        run_manager: Optional[AsyncCallbackManagerForToolRun] = None,
+    ) -> str:
+        """
+        Execute comprehensive bank analysis.
+        
+        Args:
+            bank_name: Bank name to search for (alternative to rssd_id)
+            rssd_id: Bank RSSD ID (alternative to bank_name)
+            query_type: Type of analysis to perform
+            run_manager: Optional callback manager
+            
+        Returns:
+            Formatted analysis results
+        """
+        try:
+            logger.info(
+                "Executing bank analysis",
+                bank_name=bank_name,
+                rssd_id=rssd_id,
+                query_type=query_type
+            )
+            
+            # Validate inputs
+            if not bank_name and not rssd_id:
+                return "Error: Either bank_name or rssd_id must be provided"
+            
+            # Step 1: Get bank information if we need to look up the bank
+            bank_info = None
+            if bank_name and not rssd_id:
+                # Use bank lookup to find RSSD ID
+                lookup_result = await self.bank_lookup._arun(
+                    search_term=bank_name,
+                    fuzzy_match=True,
+                    max_results=1
+                )
+                
+                if "No banks found" in lookup_result:
+                    return f"Error: Could not find bank matching '{bank_name}'"
+                
+                # Extract RSSD ID from lookup result
+                # This is a simplified extraction - in production you'd parse more carefully
+                if "RSSD ID:" in lookup_result:
+                    lines = lookup_result.split('\n')
+                    for line in lines:
+                        if "RSSD ID:" in line:
+                            rssd_id = line.split("RSSD ID:")[1].strip()
+                            break
+                
+                if not rssd_id:
+                    return f"Error: Could not extract RSSD ID for '{bank_name}'"
+                
+                # Extract bank name from lookup result for display
+                if "1." in lookup_result:
+                    lines = lookup_result.split('\n')
+                    for line in lines:
+                        if "1." in line:
+                            bank_info = {
+                                "name": line.replace("1.", "").strip(),
+                                "rssd_id": rssd_id
+                            }
+                            break
+            
+            if not bank_info:
+                # Use the provided info or get from lookup service
+                bank = self.bank_lookup.get_bank_by_rssd_id(rssd_id) if rssd_id else None
+                if bank:
+                    bank_info = {
+                        "name": bank.legal_name,
+                        "rssd_id": rssd_id,
+                        "location": bank.location
+                    }
+                else:
+                    bank_info = {
+                        "name": bank_name or "Unknown",
+                        "rssd_id": rssd_id
+                    }
+            
+            # Step 2: Get financial data based on query type
+            if query_type == "basic_info":
+                return await self._get_basic_info(bank_info, rssd_id)
+            elif query_type == "financial_summary":
+                return await self._get_financial_summary(bank_info, rssd_id)
+            elif query_type == "key_ratios":
+                return await self._get_key_ratios(bank_info, rssd_id)
+            else:
+                return f"Error: Unknown query_type '{query_type}'. Use 'basic_info', 'financial_summary', or 'key_ratios'"
+                
+        except Exception as e:
+            logger.error("Bank analysis failed", error=str(e))
+            return f"Error: Bank analysis failed - {str(e)}"
+    
+    async def _get_basic_info(self, bank_info: Dict[str, Any], rssd_id: str) -> str:
+        """Get basic bank information and key metrics."""
+        try:
+            # Get total assets (RCON2170)
+            assets_result = await self.api_client.execute(
+                rssd_id=rssd_id,
+                schedule="RC",
+                field_id="RCON2170"
+            )
+            
+            assets_value = "Not available"
+            if assets_result.success:
+                assets_value = assets_result.data.get("value", "Not available")
+            
+            return f"""Bank Analysis - Basic Information:
+
+Bank: {bank_info.get('name', 'Unknown')}
+RSSD ID: {rssd_id}
+Location: {bank_info.get('location', 'Not specified')}
+
+Key Financial Data:
+- Total Assets: {assets_value}
+
+Data Source: FFIEC Call Reports
+Analysis Type: Basic Information"""
+            
+        except Exception as e:
+            return f"Error retrieving basic info: {str(e)}"
+    
+    async def _get_financial_summary(self, bank_info: Dict[str, Any], rssd_id: str) -> str:
+        """Get comprehensive financial summary."""
+        try:
+            # Simulate getting multiple fields
+            metrics = {}
+            
+            # Total Assets
+            assets_result = await self.api_client.execute(rssd_id=rssd_id, schedule="RC", field_id="RCON2170")
+            metrics["Total Assets"] = assets_result.data.get("value", "Not available") if assets_result.success else "Not available"
+            
+            # Add small delay to simulate API calls
+            await asyncio.sleep(0.1)
+            
+            return f"""Bank Analysis - Financial Summary:
+
+Bank: {bank_info.get('name', 'Unknown')}
+RSSD ID: {rssd_id}
+
+Financial Summary:
+- Total Assets: {metrics.get('Total Assets', 'Not available')}
+- Total Deposits: Available via specific field query
+- Total Loans: Available via specific field query
+- Tier 1 Capital: Available via specific field query
+
+Note: Use call_report_data tool with specific field IDs for detailed metrics.
+
+Data Source: FFIEC Call Reports
+Analysis Type: Financial Summary"""
+            
+        except Exception as e:
+            return f"Error retrieving financial summary: {str(e)}"
+    
+    async def _get_key_ratios(self, bank_info: Dict[str, Any], rssd_id: str) -> str:
+        """Get key financial ratios."""
+        try:
+            return f"""Bank Analysis - Key Financial Ratios:
+
+Bank: {bank_info.get('name', 'Unknown')}
+RSSD ID: {rssd_id}
+
+Key Ratios:
+- Return on Assets (ROA): Calculate using net income / total assets
+- Return on Equity (ROE): Calculate using net income / total equity
+- Efficiency Ratio: Calculate using non-interest expense / revenue
+- Tier 1 Capital Ratio: Available via regulatory capital fields
+
+Note: Ratios require multiple Call Report fields for calculation.
+Use call_report_data tool with specific field IDs to get the components.
+
+Common Field IDs:
+- Net Income: RIAD4340 (RI schedule)
+- Total Assets: RCON2170 (RC schedule)
+- Total Equity: RCFD3210 (RC schedule)
+
+Data Source: FFIEC Call Reports
+Analysis Type: Key Financial Ratios"""
+            
+        except Exception as e:
+            return f"Error retrieving key ratios: {str(e)}"
+    
+    def is_available(self) -> bool:
+        """Check if the bank analysis service is available."""
+        return self.api_client.is_available() and self.bank_lookup.is_available()
