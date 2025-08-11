@@ -233,6 +233,63 @@ class Settings(BaseSettings):
         description="Streamlit application host"
     )
     
+    # Tools Configuration
+    enable_tools: bool = Field(
+        True,
+        env='ENABLE_TOOLS',
+        description="Enable external tools and function calling"
+    )
+    tools_timeout_seconds: int = Field(
+        30,
+        ge=5,
+        le=300,
+        env='TOOLS_TIMEOUT_SECONDS',
+        description="Default timeout for tool execution (seconds)"
+    )
+    tools_cache_ttl_minutes: int = Field(
+        15,
+        ge=0,
+        le=1440,
+        env='TOOLS_CACHE_TTL_MINUTES',
+        description="Tool response cache TTL in minutes (0 to disable)"
+    )
+    
+    # Call Report Tools Configuration
+    call_report_enabled: bool = Field(
+        True,
+        env='ENABLE_CALL_REPORT_TOOLS',
+        description="Enable Call Report data tools for financial analysis"
+    )
+    call_report_timeout_seconds: int = Field(
+        30,
+        ge=5,
+        le=300,
+        env='CALL_REPORT_TIMEOUT_SECONDS',
+        description="Timeout for Call Report API operations (seconds)"
+    )
+    
+    # API Keys for External Tools
+    yelp_api_key: Optional[str] = Field(
+        None,
+        env='YELP_API_KEY',
+        description="Yelp API key for restaurant ratings"
+    )
+    google_places_api_key: Optional[str] = Field(
+        None,
+        env='GOOGLE_PLACES_API_KEY',
+        description="Google Places API key for business info"
+    )
+    openweather_api_key: Optional[str] = Field(
+        None,
+        env='OPENWEATHER_API_KEY',
+        description="OpenWeatherMap API key for weather data"
+    )
+    tmdb_api_key: Optional[str] = Field(
+        None,
+        env='TMDB_API_KEY',
+        description="The Movie Database API key for movie ratings"
+    )
+    
     # Feature Flags
     enable_conversation_logging: bool = Field(
         True,
@@ -262,7 +319,7 @@ class Settings(BaseSettings):
             try:
                 self._load_from_keyvault()
                 # Log successful Key Vault loading with structured logging
-                from utils.logging_helpers import log_config_load
+                from src.utils.logging_helpers import log_config_load
                 log_config_load(
                     message="Successfully loaded configuration from Key Vault",
                     config_source=self.key_vault_url,
@@ -270,7 +327,7 @@ class Settings(BaseSettings):
                 )
             except Exception as e:
                 # Log Key Vault loading failure with structured logging
-                from utils.logging_helpers import log_config_load
+                from src.utils.logging_helpers import log_config_load
                 log_config_load(
                     message=f"Failed to load from Key Vault: {str(e)}",
                     config_source=self.key_vault_url,

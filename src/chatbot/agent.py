@@ -1,48 +1,52 @@
 """
-Main chatbot agent using LangChain's ConversationChain.
-Task 17: Chatbot agent with Azure OpenAI integration, conversation management, and graceful degradation.
+Simplified Azure OpenAI chatbot agent following Azure development best practices.
+Uses LangChain's native features with optional RAG tool integration for multi-step conversations.
 """
 
-import asyncio
 import time
 import uuid
-from typing import Dict, List, Any, Optional, Union, AsyncGenerator
+from typing import Dict, List, Any, Optional
 from datetime import datetime, timezone
 import structlog
 
-from langchain.chains import ConversationChain
-from langchain.schema import BaseMemory
 from langchain_core.messages import BaseMessage, HumanMessage, SystemMessage
+from langchain_core.chat_history import InMemoryChatMessageHistory
+from langchain_community.chat_message_histories import FileChatMessageHistory
+from langchain_core.runnables.history import RunnableWithMessageHistory
+from langchain_core.output_parsers import StrOutputParser
+from langchain.agents import create_openai_tools_agent, AgentExecutor
+from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
+from langchain.memory import ConversationBufferWindowMemory
 
-from config.settings import Settings
-from services.azure_client import AzureOpenAIClient, ResponseMetadata
-from services.logging_service import log_conversation_event, ConversationLogger
-from chatbot.conversation import ConversationManager
-from chatbot.prompts import SystemPrompts
-from utils.error_handlers import (
-    handle_error, 
-    ChatbotBaseError, 
-    AzureOpenAIError, 
-    ConversationError,
-    is_retryable_error,
-    get_retry_delay
-)
-from utils.console import get_console
+from src.config.settings import Settings
+from src.utils.azure_langchain import create_azure_chat_openai
+from src.utils.error_handlers import handle_error, ChatbotBaseError
 
 logger = structlog.get_logger(__name__)
 
 
+def create_session_history(session_id: str, persistence_file: Optional[str] = None):
+    """Create chat history for a session - Azure best practice for session management."""
+    if persistence_file:
+        from pathlib import Path
+        file_path = Path(f"{persistence_file}_{session_id}.json")
+        file_path.parent.mkdir(parents=True, exist_ok=True)
+        return FileChatMessageHistory(file_path=str(file_path))
+    return InMemoryChatMessageHistory()
+
+
 class ChatbotAgent:
     """
-    Main chatbot agent that orchestrates conversation flow.
+    Simplified Azure OpenAI chatbot agent using LangChain native features.
     
-    Features:
-    - Azure OpenAI integration through LangChain
-    - Conversation memory management
-    - Message processing and response generation
-    - Error handling with graceful degradation
-    - Performance monitoring and logging
-    - Interactive and batch conversation modes
+    Supports both simple conversation and multi-step RAG-enabled conversations.
+    
+    Follows Azure development best practices:
+    - Single responsibility principle
+    - Native LangChain integration
+    - Optional RAG tool integration
+    - Proper error handling
+    - Azure-optimized configuration
     """
     
     def __init__(
@@ -50,774 +54,351 @@ class ChatbotAgent:
         settings: Settings,
         conversation_id: Optional[str] = None,
         system_prompt: Optional[str] = None,
-        prompt_type: str = "default"
+        prompt_type: Optional[str] = None,
+        persistence_file: Optional[str] = None,
+        tools: Optional[List[Any]] = None,
+        enable_multi_step: bool = False
     ):
-        """
-        Initialize chatbot agent.
-        
-        Args:
-            settings: Application settings
-            conversation_id: Unique conversation identifier
-            system_prompt: Custom system prompt
-            prompt_type: Type of system prompt to use
-        """
+        """Initialize Azure OpenAI agent with LangChain native features and optional RAG tools."""
         self.settings = settings
         self.conversation_id = conversation_id or str(uuid.uuid4())
-        self.prompt_type = prompt_type
+        self.persistence_file = persistence_file
+        self.tools = tools or []
+        self.enable_multi_step = enable_multi_step and len(self.tools) > 0
         
+        # Azure observability setup
         self.logger = logger.bind(
             log_type="CONVERSATION",
             conversation_id=self.conversation_id,
-            component="chatbot_agent"
+            component="chatbot_agent",
+            multi_step_enabled=self.enable_multi_step,
+            tool_count=len(self.tools)
         )
         
-        # Initialize services
+        # Initialize Azure OpenAI via LangChain
         try:
-            self.azure_client = AzureOpenAIClient(settings)
-            self.conversation_manager = ConversationManager(
-                settings=settings,
-                conversation_id=self.conversation_id
-            )
-            
-            self.logger.info("Chatbot agent initialized successfully")
-            
+            self.llm = create_azure_chat_openai(settings)
+            self.logger.info("Azure OpenAI agent initialized")
         except Exception as e:
-            self.logger.error(
-                "Failed to initialize chatbot agent",
-                error=str(e),
-                error_type=type(e).__name__
-            )
+            self.logger.error("Failed to initialize Azure OpenAI", error=str(e))
             raise
         
-        # Set system prompt
-        self.system_prompt = self._initialize_system_prompt(system_prompt)
+        # Setup system prompt (enhanced for multi-step if enabled)
+        self.system_prompt = self._build_system_prompt(system_prompt, prompt_type)
         
-        # Performance tracking
-        self._conversation_start_time = time.time()
+        # Create conversation chain (simple or multi-step based on configuration)
+        if self.enable_multi_step:
+            self._setup_agent_executor()
+        else:
+            self._setup_conversation_chain()
+        
+        # Simple performance tracking
+        self._start_time = time.time()
         self._message_count = 0
-        self._total_response_time = 0.0
         
-        # State management
-        self._is_active = True
-        self._last_error = None
-        
-        self.logger.info(
-            "Chatbot agent ready",
-            prompt_type=prompt_type,
-            system_prompt_length=len(self.system_prompt)
-        )
+        self.logger.info("Azure OpenAI chatbot agent ready")
     
-    def _initialize_system_prompt(self, custom_prompt: Optional[str] = None) -> str:
-        """Initialize system prompt with configuration."""
+    def _build_system_prompt(self, custom_prompt: Optional[str], prompt_type: Optional[str]) -> str:
+        """Build system prompt - Azure best practice for prompt management with optional multi-step support."""
         if custom_prompt:
-            prompt = custom_prompt
-        else:
-            # Use settings or default
-            prompt = getattr(self.settings, 'system_message', None)
-            if not prompt:
-                prompt = SystemPrompts.get_system_prompt(
-                    prompt_type=self.prompt_type,
-                    context={
-                        'environment': self.settings.environment,
-                        'conversation_id': self.conversation_id
-                    }
-                )
+            return custom_prompt
         
-        # Validate prompt
-        validation = SystemPrompts.validate_prompt(prompt)
-        if not validation['is_valid']:
-            self.logger.warning(
-                "System prompt validation failed",
-                warnings=validation['warnings'],
-                suggestions=validation['suggestions']
-            )
+        # Base Azure-optimized prompt templates
+        base_prompts = {
+            "default": "You are a helpful AI assistant powered by Azure OpenAI. Provide accurate, concise responses.",
+            "professional": "You are a professional AI assistant. Provide clear, structured, business-appropriate responses.",
+            "creative": "You are a creative AI assistant. Think creatively and provide engaging, imaginative responses.",
+            "technical": "You are a technical AI assistant. Provide detailed, accurate technical information with examples.",
+            "tutor": "You are an AI tutor. Break down complex topics and guide users through learning step by step.",
+            "code_reviewer": "You are a code review AI. Analyze code for best practices, security, and improvements.",
+            "summarizer": "You are an AI summarizer. Provide concise, accurate summaries highlighting key points."
+        }
         
-        # Add system message to conversation
-        self.conversation_manager.add_message(
-            role="system",
-            content=prompt,
-            metadata={"type": "system_prompt", "prompt_type": self.prompt_type}
+        base_prompt = base_prompts.get(prompt_type, base_prompts["default"])
+        
+        # Enhance prompt for multi-step conversations if tools are available
+        if self.enable_multi_step and self.tools:
+            tool_descriptions = []
+            for tool in self.tools:
+                tool_name = getattr(tool, 'name', 'unknown')
+                tool_descriptions.append(f"- {tool_name}: {getattr(tool, 'description', 'No description')[:100]}...")
+            
+            tools_text = "\n".join(tool_descriptions)
+            
+            multi_step_addition = f"""
+
+MULTI-STEP CONVERSATION CAPABILITIES:
+You have access to specialized tools for complex tasks. Use these tools when appropriate to provide comprehensive answers.
+
+Available tools:
+{tools_text}
+
+For complex questions:
+1. Break down the request into logical steps
+2. Use appropriate tools to gather information
+3. Synthesize information from multiple sources
+4. Provide a comprehensive response with source attribution
+5. Ask follow-up questions if clarification is needed
+
+Always explain your reasoning when using tools and cite sources when applicable."""
+            
+            return base_prompt + multi_step_addition
+        
+        return base_prompt
+    
+    def _setup_conversation_chain(self):
+        """Setup simple LangChain conversation chain - Azure optimized."""
+        # Simple chain: add system prompt -> LLM -> string output
+        def add_system_prompt(messages: List[BaseMessage]) -> List[BaseMessage]:
+            """Add system prompt and manage context window."""
+            result = [SystemMessage(content=self.system_prompt)]
+            
+            # Simple context window management
+            max_messages = (self.settings.max_conversation_turns * 2) if self.settings.max_conversation_turns else 20
+            recent_messages = messages[-max_messages:] if len(messages) > max_messages else messages
+            
+            result.extend(msg for msg in recent_messages if not isinstance(msg, SystemMessage))
+            return result
+        
+        # Create simple chain
+        chain = add_system_prompt | self.llm | StrOutputParser()
+        
+        # Wrap with message history - LangChain handles everything else
+        self.conversation_chain = RunnableWithMessageHistory(
+            chain,
+            lambda session_id: create_session_history(session_id, self.persistence_file),
+            input_messages_key=None,
+            history_messages_key=None,
+        )
+
+    def _setup_agent_executor(self):
+        """Setup LangChain agent executor for multi-step conversations with RAG tools."""
+        self.logger.info("Setting up multi-step agent executor", tool_count=len(self.tools))
+        
+        # Create prompt template for agent with tools
+        prompt_template = ChatPromptTemplate.from_messages([
+            ("system", self.system_prompt),
+            MessagesPlaceholder("chat_history", optional=True),
+            ("human", "{input}"),
+            MessagesPlaceholder("agent_scratchpad")
+        ])
+        
+        # Create OpenAI tools agent (works with Azure OpenAI)
+        agent = create_openai_tools_agent(
+            llm=self.llm,
+            tools=self.tools,
+            prompt=prompt_template
         )
         
-        return prompt
+        # Create conversation memory for multi-step context
+        memory = ConversationBufferWindowMemory(
+            memory_key="chat_history",
+            output_key="output",
+            return_messages=True,
+            k=10  # Remember last 10 exchanges
+        )
+        
+        # Create agent executor with Azure-optimized settings
+        self.agent_executor = AgentExecutor(
+            agent=agent,
+            tools=self.tools,
+            memory=memory,
+            verbose=False,  # Disable verbose to avoid callback issues
+            max_iterations=5,  # Prevent infinite loops
+            early_stopping_method="generate",
+            handle_parsing_errors=True
+        )
+        
+        self.logger.info("Multi-step agent executor ready")
     
-    async def process_message_async(
-        self,
-        user_message: str,
-        context: Optional[Dict[str, Any]] = None
-    ) -> Dict[str, Any]:
+    def process_message(self, user_message: str, **kwargs) -> Dict[str, Any]:
         """
-        Process user message and generate response asynchronously.
+        Process user message using either simple chain or multi-step agent executor.
         
-        Args:
-            user_message: User's input message
-            context: Additional context for processing
-            
-        Returns:
-            Dictionary containing response and metadata
+        Routes between conversation chain and agent executor based on enable_multi_step flag.
         """
-        start_time = time.time()
-        message_id = str(uuid.uuid4())
+        if not user_message.strip():
+            return self._error_response("Please provide a message.")
         
-        # Use conversation logger for structured logging
-        with ConversationLogger(
-            conversation_id=self.conversation_id,
-            user_id=context.get('user_id') if context else None
-        ) as conv_logger:
-            
-            try:
-                # Validate input
-                if not user_message.strip():
-                    raise ConversationError("Empty message received")
-                
-                conv_logger.info(
-                    "Processing user message",
-                    message_length=len(user_message),
-                    message_id=message_id
-                )
-                
-                # Add user message to conversation
-                metadata = {
-                    "message_id": message_id,
-                    "timestamp": datetime.now(timezone.utc).isoformat()
-                }
-                if context:
-                    metadata.update(context)
-                
-                user_msg_id = self.conversation_manager.add_message(
-                    role="user",
-                    content=user_message,
-                    metadata=metadata
-                )
-                
-                # Prepare messages for Azure OpenAI
-                messages = self._prepare_messages_for_api()
-                
-                # Generate response with retry logic
-                response_data = await self._generate_response_with_retry(
-                    messages=messages,
-                    context=context
-                )
-                
-                # Extract response content and metadata
-                response_content = response_data['content']
-                response_metadata = response_data.get('metadata', {})
-                
-                # Add assistant response to conversation
-                assistant_msg_id = self.conversation_manager.add_message(
-                    role="assistant",
-                    content=response_content,
-                    token_count=response_metadata.get('token_usage', {}).get('completion_tokens'),
-                    metadata={
-                        "message_id": str(uuid.uuid4()),
-                        "response_metadata": response_metadata,
-                        "user_message_id": user_msg_id
-                    }
-                )
-                
-                # Calculate total response time
-                total_response_time = time.time() - start_time
-                
-                # Update performance metrics
-                self._update_performance_metrics(
-                    response_time=total_response_time,
-                    token_usage=response_metadata.get('token_usage', {})
-                )
-                
-                # Log conversation event
-                log_conversation_event(
-                    event="response_generated",
-                    conversation_id=self.conversation_id,
-                    user_message=user_message,
-                    assistant_response=response_content,
-                    token_usage=response_metadata.get('token_usage'),
-                    response_time=total_response_time
-                )
-                
-                # Prepare final response
-                final_response = {
-                    'content': response_content,
-                    'message_id': assistant_msg_id,
-                    'user_message_id': user_msg_id,
-                    'conversation_id': self.conversation_id,
-                    'metadata': {
-                        **response_metadata,
-                        'total_response_time': total_response_time,
-                        'message_count': self.conversation_manager.metadata.message_count,
-                        'conversation_turns': self._message_count + 1
-                    },
-                    'timestamp': datetime.now(timezone.utc).isoformat()
-                }
-                
-                conv_logger.info(
-                    "Message processed successfully",
-                    response_time=total_response_time,
-                    response_length=len(response_content),
-                    token_usage=response_metadata.get('token_usage')
-                )
-                
-                return final_response
-                
-            except Exception as e:
-                # Handle errors with graceful degradation
-                error_response = await self._handle_processing_error(
-                    error=e,
-                    user_message=user_message,
-                    start_time=start_time,
-                    conv_logger=conv_logger
-                )
-                
-                return error_response
-    
-    def process_message(
-        self,
-        user_message: str,
-        context: Optional[Dict[str, Any]] = None
-    ) -> Dict[str, Any]:
-        """
-        Process user message synchronously (wrapper around async method).
-        
-        Args:
-            user_message: User's input message
-            context: Additional context for processing
-            
-        Returns:
-            Dictionary containing response and metadata
-        """
-        try:
-            # Run async method with proper event loop handling
-            try:
-                # Check if we're already in a running event loop
-                loop = asyncio.get_running_loop()
-                # If we're already in an event loop, create a new task in a thread
-                import concurrent.futures
-                with concurrent.futures.ThreadPoolExecutor() as executor:
-                    future = executor.submit(
-                        asyncio.run,
-                        self.process_message_async(user_message, context)
-                    )
-                    return future.result()
-            except RuntimeError:
-                # No event loop running, safe to create new one
-                return asyncio.run(self.process_message_async(user_message, context))
-                
-        except Exception as e:
-            self.logger.error(
-                "Error in synchronous message processing",
-                error=str(e),
-                user_message_length=len(user_message) if user_message else 0
-            )
-            
-            # Return error response
-            return {
-                'content': f"I apologize, but I encountered an error: {str(e)}",
-                'error': str(e),
-                'conversation_id': self.conversation_id,
-                'timestamp': datetime.now(timezone.utc).isoformat(),
-                'is_error': True
-            }
-    
-    async def stream_response_async(
-        self,
-        user_message: str,
-        context: Optional[Dict[str, Any]] = None
-    ) -> AsyncGenerator[Dict[str, Any], None]:
-        """
-        Stream response generation for real-time output.
-        
-        Args:
-            user_message: User's input message
-            context: Additional context for processing
-            
-        Yields:
-            Response chunks with metadata
-        """
         start_time = time.time()
         
         try:
-            # Add user message to conversation
-            self.conversation_manager.add_message(
-                role="user",
-                content=user_message
-            )
-            
-            # Prepare messages for API
-            messages = self._prepare_messages_for_api()
-            
-            # Stream response from Azure OpenAI
-            full_response = ""
-            async for chunk in self.azure_client.generate_stream_async(
-                messages=messages,
-                conversation_id=self.conversation_id
-            ):
-                if chunk.get('is_final'):
-                    # Final chunk - add complete response to conversation
-                    if full_response.strip():
-                        self.conversation_manager.add_message(
-                            role="assistant",
-                            content=full_response,
-                            metadata={
-                                "streaming": True,
-                                "total_response_time": time.time() - start_time
-                            }
-                        )
-                    
-                    # Update performance metrics
-                    self._update_performance_metrics(
-                        response_time=time.time() - start_time
-                    )
+            if self.enable_multi_step and self.agent_executor:
+                # Multi-step mode: Use agent executor with RAG tools
+                self.logger.info("Processing with multi-step agent executor")
+                result = self.agent_executor.invoke({
+                    "input": user_message,
+                    "chat_history": []  # Agent executor manages memory internally
+                })
+                response_content = result.get("output", "")
+                processing_mode = "multi-step"
                 
-                else:
-                    # Regular chunk - accumulate response
-                    chunk_content = chunk.get('content', '')
-                    full_response += chunk_content
-                
-                yield chunk
-                
-        except Exception as e:
-            self.logger.error(
-                "Error in streaming response",
-                error=str(e),
-                user_message_length=len(user_message)
-            )
-            
-            yield {
-                'content': '',
-                'error': str(e),
-                'conversation_id': self.conversation_id,
-                'is_final': True,
-                'timestamp': time.time()
-            }
-    
-    def _prepare_messages_for_api(self) -> List[Dict[str, str]]:
-        """Prepare conversation messages for Azure OpenAI API."""
-        messages = []
-        
-        # Get messages from conversation manager
-        conv_messages = self.conversation_manager.get_messages(
-            limit=self.settings.max_conversation_turns,
-            include_system=True
-        )
-        
-        # Convert to API format
-        for msg in conv_messages:
-            messages.append({
-                'role': msg.role,
-                'content': msg.content
-            })
-        
-        self.logger.debug(
-            "Prepared messages for API",
-            message_count=len(messages),
-            total_length=sum(len(msg['content']) for msg in messages)
-        )
-        
-        return messages
-    
-    async def _generate_response_with_retry(
-        self,
-        messages: List[Dict[str, str]],
-        context: Optional[Dict[str, Any]] = None,
-        max_retries: int = 3
-    ) -> Dict[str, Any]:
-        """Generate response with retry logic for resilience."""
-        last_error = None
-        
-        for attempt in range(max_retries + 1):
-            try:
-                self.logger.debug(
-                    "Generating response",
-                    attempt=attempt + 1,
-                    max_retries=max_retries + 1
-                )
-                
-                response = await self.azure_client.generate_response_async(
-                    messages=messages,
-                    conversation_id=self.conversation_id,
-                    **(context or {})
-                )
-                
-                return response
-                
-            except Exception as e:
-                last_error = e
-                chatbot_error = handle_error(e, context={'attempt': attempt + 1})
-                
-                # Check if error is retryable
-                if attempt < max_retries and is_retryable_error(e):
-                    retry_delay = get_retry_delay(e, attempt + 1)
-                    
-                    self.logger.warning(
-                        "Retryable error occurred, will retry",
-                        error=str(e),
-                        attempt=attempt + 1,
-                        retry_delay=retry_delay
-                    )
-                    
-                    await asyncio.sleep(retry_delay)
-                    continue
-                else:
-                    self.logger.error(
-                        "Max retries exceeded or non-retryable error",
-                        error=str(e),
-                        attempt=attempt + 1,
-                        is_retryable=is_retryable_error(e)
-                    )
-                    raise chatbot_error
-        
-        # This should never be reached, but just in case
-        if last_error:
-            raise handle_error(last_error)
-        
-        raise AzureOpenAIError("Unexpected error in response generation")
-    
-    async def _handle_processing_error(
-        self,
-        error: Exception,
-        user_message: str,
-        start_time: float,
-        conv_logger
-    ) -> Dict[str, Any]:
-        """Handle processing errors with graceful degradation."""
-        processing_time = time.time() - start_time
-        
-        # Convert to chatbot error
-        chatbot_error = handle_error(error, context={
-            'user_message_length': len(user_message),
-            'processing_time': processing_time,
-            'conversation_id': self.conversation_id
-        })
-        
-        # Store last error for diagnostics
-        self._last_error = chatbot_error
-        
-        # Log the error
-        log_conversation_event(
-            event="error_occurred",
-            conversation_id=self.conversation_id,
-            user_message=user_message,
-            error=str(chatbot_error),
-            processing_time=processing_time
-        )
-        
-        # Generate graceful error response
-        if isinstance(chatbot_error, AzureOpenAIError):
-            error_content = "I'm having trouble connecting to my AI service right now. Please try again in a moment."
-        elif isinstance(chatbot_error, ConversationError):
-            error_content = "There was an issue with our conversation. Let me try to help you in a different way."
-        else:
-            error_content = "I encountered an unexpected issue. Please try rephrasing your message or ask something else."
-        
-        # Add recovery suggestions if available
-        if chatbot_error.recovery_suggestions:
-            error_content += "\n\nHere are some things you can try:\n"
-            error_content += "\n".join(f"• {suggestion}" for suggestion in chatbot_error.recovery_suggestions[:3])
-        
-        # Add error response to conversation
-        try:
-            error_msg_id = self.conversation_manager.add_message(
-                role="assistant",
-                content=error_content,
-                metadata={
-                    "is_error_response": True,
-                    "original_error": str(error),
-                    "error_type": type(error).__name__,
-                    "error_code": getattr(chatbot_error, 'error_code', None)
-                }
-            )
-        except Exception as conv_error:
-            conv_logger.error(
-                "Failed to add error response to conversation",
-                conv_error=str(conv_error)
-            )
-            error_msg_id = None
-        
-        return {
-            'content': error_content,
-            'message_id': error_msg_id,
-            'conversation_id': self.conversation_id,
-            'error': str(chatbot_error),
-            'error_code': getattr(chatbot_error, 'error_code', None),
-            'recovery_suggestions': chatbot_error.recovery_suggestions,
-            'is_error': True,
-            'metadata': {
-                'processing_time': processing_time,
-                'error_type': type(chatbot_error).__name__
-            },
-            'timestamp': datetime.now(timezone.utc).isoformat()
-        }
-    
-    def _update_performance_metrics(
-        self,
-        response_time: float,
-        token_usage: Optional[Dict[str, Any]] = None
-    ):
-        """Update performance tracking metrics."""
-        self._message_count += 1
-        self._total_response_time += response_time
-        
-        # Log performance metrics
-        from services.logging_service import log_performance_metrics
-        
-        metrics = {
-            'message_count': self._message_count,
-            'average_response_time': self._total_response_time / self._message_count,
-            'conversation_duration': time.time() - self._conversation_start_time
-        }
-        
-        if token_usage:
-            metrics.update(token_usage)
-        
-        log_performance_metrics(
-            operation="message_processing",
-            duration=response_time,
-            success=True,
-            **metrics
-        )
-    
-    def run_interactive_session(
-        self,
-        max_turns: Optional[int] = None,
-        welcome_message: bool = True
-    ):
-        """
-        Run interactive chat session.
-        
-        Args:
-            max_turns: Maximum number of conversation turns
-            welcome_message: Whether to show welcome message
-        """
-        console = get_console()
-        
-        try:
-            if welcome_message:
-                console.print_banner("Azure OpenAI Chatbot", "1.0.0")
-                console.print_welcome_message()
-            
-            turn_count = 0
-            max_turns = max_turns or self.settings.max_conversation_turns
-            
-            while self._is_active and (max_turns is None or turn_count < max_turns):
-                try:
-                    # Get user input
-                    user_input = console.prompt_user(
-                        "You",
-                        default=""
-                    ).strip()
-                    
-                    if not user_input:
-                        continue
-                    
-                    # Handle special commands
-                    if user_input.startswith('/'):
-                        if self._handle_command(user_input, console):
-                            continue
-                        else:
-                            break  # Exit command
-                    
-                    # Show processing status
-                    with console.show_status("🤔 Thinking..."):
-                        response = self.process_message(user_input)
-                    
-                    # Display response
-                    if response.get('is_error'):
-                        console.print_error(response.get('error', 'Unknown error occurred'))
-                        if response.get('recovery_suggestions'):
-                            console.print_status(
-                                "Suggestions: " + "; ".join(response['recovery_suggestions'][:2]),
-                                "info"
-                            )
-                    else:
-                        console.print_conversation_message(
-                            role="assistant",
-                            content=response['content'],
-                            timestamp=datetime.fromisoformat(response['timestamp'].replace('Z', '+00:00')),
-                            token_count=response.get('metadata', {}).get('token_usage', {}).get('total_tokens')
-                        )
-                    
-                    turn_count += 1
-                    
-                except KeyboardInterrupt:
-                    console.print_status("\nChat interrupted by user", "warning")
-                    break
-                except Exception as e:
-                    console.print_error(f"Unexpected error: {str(e)}")
-                    self.logger.error("Interactive session error", error=str(e))
-                    
-                    if not console.confirm("Continue chatting?", default=True):
-                        break
-            
-            # Show final statistics
-            if turn_count > 0:
-                console.print_separator("Session Summary")
-                stats = self.get_conversation_statistics()
-                console.print_conversation_stats(stats)
-            
-            console.print_goodbye_message()
-            
-        except Exception as e:
-            self.logger.error("Fatal error in interactive session", error=str(e))
-            console.print_error(f"Fatal error: {str(e)}")
-        finally:
-            self._is_active = False
-    
-    def _handle_command(self, command: str, console) -> bool:
-        """
-        Handle special chat commands.
-        
-        Args:
-            command: Command string
-            console: Console instance
-            
-        Returns:
-            True to continue chatting, False to exit
-        """
-        command = command.lower().strip()
-        
-        if command in ['/exit', '/quit', '/q']:
-            return False
-        
-        elif command == '/help':
-            commands = {
-                '/help': 'Show available commands',
-                '/stats': 'Show conversation statistics',
-                '/clear': 'Clear conversation history',
-                '/save [file]': 'Save conversation to file',
-                '/load [file]': 'Load conversation from file',
-                '/export': 'Export conversation as JSON',
-                '/health': 'Check system health',
-                '/exit, /quit': 'Exit the application'
-            }
-            console.print_help(commands)
-        
-        elif command == '/stats':
-            stats = self.get_conversation_statistics()
-            console.print_conversation_stats(stats)
-        
-        elif command == '/clear':
-            if console.confirm("Clear conversation history?", default=False):
-                self.clear_conversation()
-                console.print_status("Conversation history cleared", "success")
-        
-        elif command.startswith('/save'):
-            parts = command.split(' ', 1)
-            filename = parts[1] if len(parts) > 1 else f"conversation_{self.conversation_id[:8]}.json"
-            try:
-                self.save_conversation(filename)
-                console.print_status(f"Conversation saved to {filename}", "success")
-            except Exception as e:
-                console.print_error(f"Failed to save conversation: {str(e)}")
-        
-        elif command.startswith('/load'):
-            parts = command.split(' ', 1)
-            if len(parts) < 2:
-                console.print_error("Please specify a filename: /load <filename>")
             else:
-                filename = parts[1]
-                try:
-                    self.load_conversation(filename)
-                    console.print_status(f"Conversation loaded from {filename}", "success")
-                except Exception as e:
-                    console.print_error(f"Failed to load conversation: {str(e)}")
-        
-        elif command == '/export':
-            try:
-                data = self.export_conversation()
-                console.print_status(f"Conversation exported ({len(data['messages'])} messages)", "success")
-                # Could implement clipboard copy or file save here
-            except Exception as e:
-                console.print_error(f"Failed to export conversation: {str(e)}")
-        
-        elif command == '/health':
-            health_status = self.health_check()
-            if health_status['status'] == 'healthy':
-                console.print_status("System is healthy ✓", "success")
-            else:
-                console.print_status(f"System health issue: {health_status.get('error', 'Unknown')}", "warning")
-        
-        else:
-            console.print_status(f"Unknown command: {command}. Type /help for available commands.", "warning")
-        
-        return True
-    
-    def get_conversation_statistics(self) -> Dict[str, Any]:
-        """Get comprehensive conversation statistics."""
-        base_stats = self.conversation_manager.get_statistics()
-        
-        # Add agent-specific metrics
-        agent_stats = {
-            'average_response_time': (
-                self._total_response_time / self._message_count 
-                if self._message_count > 0 else 0.0
-            ),
-            'total_response_time': self._total_response_time,
-            'session_duration': time.time() - self._conversation_start_time,
-            'azure_client_metrics': self.azure_client.get_metrics(),
-            'last_error': str(self._last_error) if self._last_error else None,
-            'system_prompt_type': self.prompt_type,
-            'is_active': self._is_active
-        }
-        
-        return {**base_stats, **agent_stats}
-    
-    def clear_conversation(self):
-        """Clear conversation history."""
-        self.conversation_manager.clear_memory()
-        
-        # Re-add system prompt
-        self.conversation_manager.add_message(
-            role="system",
-            content=self.system_prompt,
-            metadata={"type": "system_prompt", "prompt_type": self.prompt_type}
-        )
-        
-        self.logger.info("Conversation cleared and system prompt reinitialized")
-    
-    def save_conversation(self, filename: str):
-        """Save conversation to file."""
-        self.conversation_manager.save_to_file(filename)
-    
-    def load_conversation(self, filename: str):
-        """Load conversation from file."""
-        self.conversation_manager.load_from_file(filename)
-    
-    def export_conversation(self) -> Dict[str, Any]:
-        """Export conversation data."""
-        return self.conversation_manager.export_conversation(include_metadata=True)
-    
-    def health_check(self) -> Dict[str, Any]:
-        """Perform comprehensive health check."""
-        try:
-            # Check Azure OpenAI client
-            azure_health = self.azure_client.health_check()
+                # Simple mode: Use conversation chain directly
+                self.logger.info("Processing with simple conversation chain")
+                config = {"configurable": {"session_id": self.conversation_id}}
+                response_content = self.conversation_chain.invoke(
+                    [HumanMessage(content=user_message)],
+                    config=config
+                )
+                processing_mode = "simple"
             
-            # Check conversation manager
-            conv_stats = self.conversation_manager.get_statistics()
+            # Simple performance tracking
+            response_time = time.time() - start_time
+            self._message_count += 1
             
-            # Overall health assessment
-            is_healthy = (
-                azure_health['status'] == 'healthy' and
-                self._is_active and
-                conv_stats['total_messages'] >= 0  # Basic sanity check
+            # Azure observability logging
+            self.logger.info(
+                f"Response generated via {processing_mode} mode",
+                message_length=len(user_message),
+                response_length=len(response_content),
+                response_time=response_time,
+                message_count=self._message_count,
+                processing_mode=processing_mode
             )
             
             return {
-                'status': 'healthy' if is_healthy else 'degraded',
-                'azure_openai': azure_health,
-                'conversation_manager': {
-                    'status': 'healthy',
-                    'message_count': conv_stats['total_messages'],
-                    'memory_type': conv_stats['memory_type']
-                },
-                'agent': {
-                    'is_active': self._is_active,
-                    'message_count': self._message_count,
-                    'last_error': str(self._last_error) if self._last_error else None,
-                    'uptime': time.time() - self._conversation_start_time
-                },
+                'content': response_content,
+                'conversation_id': self.conversation_id,
+                'message_count': self._message_count,
+                'response_time': response_time,
+                'processing_mode': processing_mode,
                 'timestamp': datetime.now(timezone.utc).isoformat()
             }
             
+        except Exception as e:
+            return self._handle_error(e, user_message, time.time() - start_time)
+    
+    def stream_response(self, user_message: str, **kwargs):
+        """Stream response using appropriate mode - supports both simple and multi-step."""
+        if not user_message.strip():
+            yield self._error_response("Please provide a message.")
+            return
+        
+        try:
+            if self.enable_multi_step and self.agent_executor:
+                # Multi-step mode: Stream from agent executor
+                self.logger.info("Streaming with multi-step agent executor")
+                for chunk in self.agent_executor.stream({
+                    "input": user_message,
+                    "chat_history": []  # Agent manages memory internally
+                }):
+                    # Agent executor streams structured output
+                    if 'output' in chunk:
+                        yield {
+                            'content': chunk['output'],
+                            'conversation_id': self.conversation_id,
+                            'is_streaming': True,
+                            'processing_mode': 'multi-step',
+                            'timestamp': time.time()
+                        }
+                    elif 'intermediate_steps' in chunk:
+                        # Optional: expose tool usage for debugging
+                        yield {
+                            'content': f"[Using tool: {chunk['intermediate_steps'][-1][0].tool if chunk['intermediate_steps'] else 'unknown'}]",
+                            'conversation_id': self.conversation_id,
+                            'is_streaming': True,
+                            'is_intermediate': True,
+                            'processing_mode': 'multi-step',
+                            'timestamp': time.time()
+                        }
+            
+            else:
+                # Simple mode: Stream from conversation chain
+                self.logger.info("Streaming with simple conversation chain")
+                config = {"configurable": {"session_id": self.conversation_id}}
+                
+                for chunk in self.conversation_chain.stream(
+                    [HumanMessage(content=user_message)],
+                    config=config
+                ):
+                    yield {
+                        'content': chunk,
+                        'conversation_id': self.conversation_id,
+                        'is_streaming': True,
+                        'processing_mode': 'simple',
+                        'timestamp': time.time()
+                    }
+            
+            # Final marker
+            yield {
+                'content': '',
+                'conversation_id': self.conversation_id,
+                'is_streaming': False,
+                'is_final': True,
+                'timestamp': time.time()
+            }
+            
+        except Exception as e:
+            yield self._error_response(f"Streaming error: {str(e)}")
+    
+    def _handle_error(self, error: Exception, user_message: str, response_time: float) -> Dict[str, Any]:
+        """Simplified error handling - Azure pattern."""
+        chatbot_error = handle_error(error)
+        
+        self.logger.error(
+            "Processing error",
+            error=str(chatbot_error),
+            error_type=type(error).__name__,
+            response_time=response_time,
+            message_length=len(user_message)
+        )
+        
+        return self._error_response(
+            "I encountered an issue processing your message. Please try again.",
+            str(chatbot_error)
+        )
+    
+    def _error_response(self, message: str, error: Optional[str] = None) -> Dict[str, Any]:
+        """Create standardized error response."""
+        return {
+            'content': message,
+            'conversation_id': self.conversation_id,
+            'is_error': True,
+            'error': error,
+            'timestamp': datetime.now(timezone.utc).isoformat()
+        }
+    
+    def get_conversation_history(self) -> List[BaseMessage]:
+        """Get conversation history from LangChain."""
+        history = create_session_history(self.conversation_id, self.persistence_file)
+        return history.messages
+    
+    def clear_conversation(self):
+        """Clear conversation using LangChain native method."""
+        history = create_session_history(self.conversation_id, self.persistence_file)
+        history.clear()
+        self._message_count = 0
+        self.logger.info("Conversation cleared")
+    
+    def get_statistics(self) -> Dict[str, Any]:
+        """Simple statistics - Azure monitoring pattern."""
+        history = self.get_conversation_history()
+        return {
+            'conversation_id': self.conversation_id,
+            'message_count': self._message_count,
+            'total_messages': len(history),
+            'uptime': time.time() - self._start_time,
+            'azure_model': getattr(self.llm, 'model_name', 'unknown'),
+            'persistence': 'file' if self.persistence_file else 'memory'
+        }
+    
+    def health_check(self) -> Dict[str, Any]:
+        """Azure health check pattern."""
+        try:
+            # Simple test with Azure OpenAI
+            test_response = self.llm.invoke([
+                SystemMessage(content="You are a test assistant."),
+                HumanMessage(content="Health check")
+            ])
+            
+            return {
+                'status': 'healthy',
+                'azure_openai': 'connected',
+                'model': getattr(self.llm, 'model_name', 'unknown'),
+                'test_response_length': len(test_response.content),
+                'timestamp': datetime.now(timezone.utc).isoformat()
+            }
         except Exception as e:
             return {
                 'status': 'unhealthy',
@@ -825,20 +406,44 @@ class ChatbotAgent:
                 'timestamp': datetime.now(timezone.utc).isoformat()
             }
     
-    def shutdown(self):
-        """Gracefully shutdown the agent."""
-        self.logger.info("Shutting down chatbot agent")
-        self._is_active = False
-        
-        # Could add cleanup logic here if needed
-        
+    def save_conversation(self, filename: str):
+        """Save conversation to file - simplified."""
+        try:
+            from pathlib import Path
+            import json
+            
+            history = self.get_conversation_history()
+            
+            data = {
+                'conversation_id': self.conversation_id,
+                'timestamp': datetime.now(timezone.utc).isoformat(),
+                'messages': [
+                    {
+                        'type': type(msg).__name__,
+                        'content': msg.content
+                    }
+                    for msg in history
+                ]
+            }
+            
+            file_path = Path(filename)
+            file_path.parent.mkdir(parents=True, exist_ok=True)
+            
+            with open(file_path, 'w', encoding='utf-8') as f:
+                json.dump(data, f, indent=2, ensure_ascii=False)
+                
+            self.logger.info("Conversation saved", filename=filename)
+            
+        except Exception as e:
+            self.logger.error("Failed to save conversation", error=str(e))
+            raise
+    
     def __repr__(self) -> str:
-        """String representation of the chatbot agent."""
+        """String representation."""
         return (
             f"ChatbotAgent("
             f"id={self.conversation_id[:8]}, "
             f"messages={self._message_count}, "
-            f"active={self._is_active}, "
-            f"prompt_type={self.prompt_type}"
+            f"model={getattr(self.llm, 'model_name', 'unknown')}"
             f")"
         )

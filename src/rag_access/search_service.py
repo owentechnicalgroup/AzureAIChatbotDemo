@@ -1,0 +1,421 @@
+"""
+SearchService - AI access layer for RAG operations.
+
+Handles AI queries and response generation using document context.
+"""
+
+import asyncio
+from typing import List, Dict, Any, Optional
+from datetime import datetime, timezone
+
+import structlog
+from openai import AsyncAzureOpenAI
+
+from src.config.settings import Settings
+from src.document_management.database_manager import DatabaseManager
+from .rag_models import RAGQuery, RAGResponse, SearchResult, SearchContext
+from .prompts.rag_prompts import RAGPrompts
+
+
+logger = structlog.get_logger(__name__)
+
+
+class SearchService:
+    """
+    AI access layer for RAG operations.
+    
+    Responsibilities:
+    - Document search and retrieval
+    - AI response generation with context
+    - Query processing and refinement
+    - Response formatting and metadata
+    
+    Separation of Concerns:
+    - Only handles AI queries and response generation
+    - Uses DocumentManager for document operations
+    - Focuses on the AI access layer only
+    """
+    
+    def __init__(self, settings: Settings):
+        """
+        Initialize search service.
+        
+        Args:
+            settings: Application settings
+        """
+        self.settings = settings
+        self.logger = logger.bind(
+            log_type="AZURE_OPENAI",
+            component="search_service"
+        )
+        
+        # Initialize database manager for search
+        self.database_manager = DatabaseManager(settings)
+        
+        # Initialize Azure OpenAI client
+        self.openai_client = AsyncAzureOpenAI(
+            azure_endpoint=self.settings.azure_openai_endpoint,
+            api_key=self.settings.azure_openai_api_key,
+            api_version=self.settings.azure_openai_api_version
+        )
+        
+        self.logger.info("Search Service initialized")
+    
+    async def search_and_generate(
+        self,
+        query: RAGQuery,
+        context: Optional[SearchContext] = None
+    ) -> RAGResponse:
+        """
+        Search documents and generate AI response.
+        
+        Args:
+            query: RAG query with search parameters
+            context: Optional search context for tracking
+            
+        Returns:
+            RAG response with generated content and sources
+        """
+        start_time = datetime.now(timezone.utc)
+        
+        try:
+            self.logger.info(
+                "Starting RAG search and generation",
+                query=query.query,
+                max_chunks=query.max_chunks,
+                use_general_knowledge=query.use_general_knowledge
+            )
+            
+            # Search for relevant documents
+            search_results = await self._search_documents(query)
+            
+            # Generate response with context
+            if search_results or query.use_general_knowledge:
+                response_content = await self._generate_response(query, search_results)
+                processing_mode = self._determine_processing_mode(search_results, query.use_general_knowledge)
+            else:
+                response_content = RAGPrompts.get_no_context_prompt(
+                    query.query, 
+                    query.use_general_knowledge
+                )
+                processing_mode = "no_context"
+            
+            # Calculate processing time
+            processing_time = (datetime.now(timezone.utc) - start_time).total_seconds()
+            
+            # Determine whether to include sources based on processing mode and quality
+            sources_to_include = search_results
+            
+            # If using general knowledge and documents have low relevance, don't include sources
+            if query.use_general_knowledge and search_results:
+                high_relevance_threshold = 0.6  # Only include sources with high relevance
+                high_quality_sources = [s for s in search_results if s.score >= high_relevance_threshold]
+                
+                # If no high-quality sources and we're using general knowledge, don't show sources
+                if not high_quality_sources and processing_mode in ["hybrid", "general_knowledge"]:
+                    sources_to_include = []
+            
+            # Create response
+            response = RAGResponse(
+                content=response_content,
+                sources=sources_to_include,
+                query=query.query,
+                processing_mode=processing_mode,
+                metadata={
+                    "processing_time": processing_time,
+                    "search_params": {
+                        "max_chunks": query.max_chunks,
+                        "score_threshold": query.score_threshold,
+                        "use_general_knowledge": query.use_general_knowledge
+                    },
+                    "context": context.__dict__ if context else None,
+                    "original_sources_found": len(search_results),
+                    "sources_included": len(sources_to_include)
+                }
+            )
+            
+            self.logger.info(
+                "RAG search and generation completed",
+                query=query.query,
+                sources_found=len(search_results),
+                processing_mode=processing_mode,
+                processing_time=processing_time
+            )
+            
+            return response
+            
+        except Exception as e:
+            self.logger.error(
+                "RAG search and generation failed",
+                query=query.query,
+                error=str(e)
+            )
+            
+            # Return error response
+            return RAGResponse(
+                content=f"Sorry, I encountered an error processing your query: {str(e)}",
+                sources=[],
+                query=query.query,
+                processing_mode="error",
+                metadata={"error": str(e)}
+            )
+    
+    async def _search_documents(self, query: RAGQuery) -> List[SearchResult]:
+        """
+        Search for relevant documents.
+        
+        Args:
+            query: RAG query with search parameters
+            
+        Returns:
+            List of search results
+        """
+        try:
+            # Use database manager for similarity search
+            raw_results = await self.database_manager.search_similar(
+                query=query.query,
+                max_results=query.max_chunks,
+                score_threshold=query.score_threshold,
+                filters=query.filters
+            )
+            
+            # Convert to SearchResult objects
+            search_results = []
+            for result in raw_results:
+                search_result = SearchResult(
+                    content=result['content'],
+                    source=result['source'],
+                    score=result['score'],
+                    metadata=result['metadata'],
+                    chunk_id=result.get('chunk_id')
+                )
+                search_results.append(search_result)
+            
+            return search_results
+            
+        except Exception as e:
+            self.logger.error("Document search failed", query=query.query, error=str(e))
+            return []
+    
+    async def _generate_response(
+        self,
+        query: RAGQuery,
+        search_results: List[SearchResult]
+    ) -> str:
+        """
+        Generate AI response using search results as context.
+        
+        Args:
+            query: Original RAG query
+            search_results: Document search results
+            
+        Returns:
+            Generated response content
+        """
+        try:
+            # Prepare system prompt
+            system_prompt = RAGPrompts.get_system_prompt(query.use_general_knowledge)
+            
+            # Format context prompt
+            sources_data = []
+            for result in search_results:
+                sources_data.append({
+                    'content': result.content,
+                    'source': result.source,
+                    'score': result.score
+                })
+            
+            if search_results:
+                user_prompt = RAGPrompts.format_context_prompt(sources_data, query.query)
+            else:
+                user_prompt = RAGPrompts.get_no_context_prompt(
+                    query.query, 
+                    query.use_general_knowledge
+                )
+            
+            # Generate response with Azure OpenAI
+            response = await self.openai_client.chat.completions.create(
+                model=self.settings.azure_openai_deployment,
+                messages=[
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": user_prompt}
+                ],
+                temperature=0.3,
+                max_tokens=1500
+            )
+            
+            content = response.choices[0].message.content
+            
+            self.logger.info(
+                "AI response generated",
+                query=query.query,
+                sources_used=len(search_results),
+                tokens_used=response.usage.total_tokens if response.usage else 0
+            )
+            
+            return content
+            
+        except Exception as e:
+            self.logger.error("AI response generation failed", query=query.query, error=str(e))
+            return f"I apologize, but I encountered an error generating a response: {str(e)}"
+    
+    def _determine_processing_mode(
+        self,
+        search_results: List[SearchResult],
+        use_general_knowledge: bool
+    ) -> str:
+        """
+        Determine the processing mode based on results and settings.
+        
+        Args:
+            search_results: Document search results
+            use_general_knowledge: Whether general knowledge is enabled
+            
+        Returns:
+            Processing mode string
+        """
+        if search_results:
+            if use_general_knowledge:
+                return "hybrid"
+            else:
+                return "document_based"
+        else:
+            if use_general_knowledge:
+                return "general_knowledge"
+            else:
+                return "no_context"
+    
+    async def search_refinement_suggestions(self, query: str) -> Dict[str, Any]:
+        """
+        Get search refinement suggestions for a query.
+        
+        Args:
+            query: Original search query
+            
+        Returns:
+            Refinement suggestions and metadata
+        """
+        try:
+            # Perform a quick search to count results
+            quick_search = RAGQuery(
+                query=query,
+                max_chunks=1,
+                score_threshold=0.1
+            )
+            
+            results = await self._search_documents(quick_search)
+            results_count = len(results)
+            
+            refinement_prompt = RAGPrompts.get_search_refinement_prompt(
+                query, 
+                results_count
+            )
+            
+            return {
+                "refinement_text": refinement_prompt,
+                "results_count": results_count,
+                "suggestions": self._generate_search_suggestions(query, results_count)
+            }
+            
+        except Exception as e:
+            self.logger.error("Search refinement failed", query=query, error=str(e))
+            return {
+                "refinement_text": "Unable to generate search suggestions at this time.",
+                "results_count": 0,
+                "suggestions": []
+            }
+    
+    def _generate_search_suggestions(self, query: str, results_count: int) -> List[str]:
+        """Generate contextual search suggestions."""
+        suggestions = []
+        
+        if results_count == 0:
+            suggestions.extend([
+                "Try using different keywords",
+                "Make your query more specific",
+                "Check if relevant documents are uploaded",
+                "Use broader terms if your query is very specific"
+            ])
+        elif results_count < 2:
+            suggestions.extend([
+                "Try related terms or synonyms",
+                "Make your query more general for more results",
+                "Consider uploading more relevant documents"
+            ])
+        
+        return suggestions
+    
+    async def get_available_documents(self) -> List[Dict[str, Any]]:
+        """
+        Get list of available documents for search.
+        
+        Returns:
+            List of document summaries
+        """
+        try:
+            return await self.database_manager.get_documents_summary()
+        except Exception as e:
+            self.logger.error("Failed to get available documents", error=str(e))
+            return []
+    
+    async def health_check(self) -> Dict[str, Any]:
+        """
+        Perform health check on the search service.
+        
+        Returns:
+            Health status information
+        """
+        try:
+            # Check database health
+            db_health = await self.database_manager.health_check()
+            
+            # Test OpenAI connection (simple ping)
+            try:
+                test_response = await self.openai_client.chat.completions.create(
+                    model=self.settings.azure_openai_deployment,
+                    messages=[{"role": "user", "content": "ping"}],
+                    max_tokens=5
+                )
+                openai_status = "healthy"
+            except Exception:
+                openai_status = "unhealthy"
+            
+            return {
+                "status": "healthy" if db_health["status"] == "healthy" and openai_status == "healthy" else "unhealthy",
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+                "components": {
+                    "database_manager": db_health["status"],
+                    "azure_openai": openai_status,
+                    "search_service": "active"
+                },
+                "database_health": db_health
+            }
+            
+        except Exception as e:
+            return {
+                "status": "unhealthy",
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+                "error": str(e),
+                "components": {
+                    "database_manager": "unknown",
+                    "azure_openai": "unknown",
+                    "search_service": "error"
+                }
+            }
+    
+    def is_available(self) -> bool:
+        """
+        Check if the search service is available.
+        
+        Returns:
+            True if service is ready for operations
+        """
+        try:
+            return (
+                self.database_manager.is_available() and
+                bool(self.settings.azure_openai_endpoint) and
+                bool(self.settings.azure_openai_api_key) and
+                bool(self.settings.azure_openai_deployment)
+            )
+        except Exception:
+            return False
