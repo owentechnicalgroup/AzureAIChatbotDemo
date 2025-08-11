@@ -1,24 +1,17 @@
 """
-DatabaseManager - ChromaDB interface for document management.
+DatabaseManager - Document management business logic layer.
 
-Handles all database operations for document storage and retrieval.
+Handles document management operations using ChromaDBService for persistence.
+Provides business logic and maintains API compatibility.
 """
 
-import os
-import asyncio
-from pathlib import Path
 from typing import List, Dict, Any, Optional
 from datetime import datetime, timezone
-import logging
-import warnings
 
 import structlog
-import chromadb
-from chromadb.config import Settings as ChromaSettings
-from langchain_chroma import Chroma
-from langchain_openai import AzureOpenAIEmbeddings
 
 from src.config.settings import Settings
+from .chromadb_service import ChromaDBService
 
 
 logger = structlog.get_logger(__name__)
@@ -26,23 +19,24 @@ logger = structlog.get_logger(__name__)
 
 class DatabaseManager:
     """
-    ChromaDB interface for document management operations.
+    Document management business logic layer using ChromaDBService.
     
     Responsibilities:
-    - ChromaDB collection management
-    - Document storage and indexing
-    - Chunk metadata management
-    - Database health monitoring
+    - Document lifecycle management business logic
+    - Metadata processing and validation
+    - Search result formatting and filtering
+    - Business rule enforcement
+    - Statistics and reporting
     
     Separation of Concerns:
-    - Pure database operations only
-    - No AI query processing
-    - No document processing logic
+    - Uses ChromaDBService for all ChromaDB operations
+    - Contains only business logic, no ChromaDB-specific code
+    - Maintains API compatibility with existing code
     """
     
     def __init__(self, settings: Settings):
         """
-        Initialize database manager.
+        Initialize database manager with ChromaDB service.
         
         Args:
             settings: Application settings
@@ -53,61 +47,14 @@ class DatabaseManager:
             component="database_manager"
         )
         
-        # Disable ChromaDB telemetry
-        os.environ["ANONYMIZED_TELEMETRY"] = "False"
-        os.environ["CHROMA_TELEMETRY_DISABLED"] = "True"
+        # Use ChromaDBService for all ChromaDB operations
+        self.chromadb = ChromaDBService(settings)
         
-        # Suppress ChromaDB logging
-        logging.getLogger("chromadb").setLevel(logging.ERROR)
-        logging.getLogger("chromadb.telemetry").setLevel(logging.CRITICAL)
-        warnings.filterwarnings("ignore", category=UserWarning, module="chromadb")
-        
-        # Setup persistence directory
-        self.persist_directory = Path(settings.chromadb_storage_path)
-        self.persist_directory.mkdir(parents=True, exist_ok=True)
-        
-        # Initialize embeddings
-        self.embeddings = self._create_embeddings()
-        
-        # ChromaDB instance (will be initialized lazily)
-        self._db: Optional[Chroma] = None
-        self._collection_name = "rag_documents"
-        
-        self.logger.info("Database Manager initialized")
-    
-    def _create_embeddings(self) -> AzureOpenAIEmbeddings:
-        """Create Azure OpenAI embeddings instance."""
-        return AzureOpenAIEmbeddings(
-            api_key=self.settings.azure_openai_api_key,
-            azure_endpoint=self.settings.azure_openai_endpoint,
-            azure_deployment=self.settings.azure_embedding_deployment,
-            openai_api_version=self.settings.azure_openai_api_version,
-            chunk_size=1000
-        )
-    
-    async def _ensure_initialized(self):
-        """Ensure ChromaDB instance is initialized."""
-        if self._db is None:
-            # Create ChromaDB client with persistence
-            client = chromadb.PersistentClient(
-                path=str(self.persist_directory),
-                settings=ChromaSettings(
-                    anonymized_telemetry=False,
-                    allow_reset=True
-                )
-            )
-            
-            # Create Chroma vector store
-            self._db = Chroma(
-                client=client,
-                collection_name=self._collection_name,
-                embedding_function=self.embeddings,
-                persist_directory=str(self.persist_directory)
-            )
+        self.logger.info("Database Manager initialized with ChromaDBService")
     
     async def add_documents(self, documents: List[Any]) -> List[str]:
         """
-        Add document chunks to the database.
+        Add document chunks to the database with business logic processing.
         
         Args:
             documents: List of document chunks with content and metadata
@@ -116,8 +63,6 @@ class DatabaseManager:
             List of document IDs that were added
         """
         try:
-            await self._ensure_initialized()
-            
             if not documents:
                 return []
             
@@ -132,18 +77,23 @@ class DatabaseManager:
                     from langchain_core.documents import Document as LangChainDocument
                     content = str(doc)
                     metadata = getattr(doc, 'metadata', {})
+                    
+                    # Add business logic: ensure required metadata fields
+                    if 'upload_timestamp' not in metadata:
+                        metadata['upload_timestamp'] = datetime.now(timezone.utc).isoformat()
+                    
                     langchain_docs.append(LangChainDocument(page_content=content, metadata=metadata))
             
-            # Add to vector store
-            doc_ids = self._db.add_documents(langchain_docs)
+            # Delegate to ChromaDB service
+            doc_ids = await self.chromadb.add_documents(langchain_docs)
             
             self.logger.info(
-                "Documents added to database",
+                "Documents processed and added to database",
                 count=len(documents),
-                collection="rag_documents"
+                successful_ids=len(doc_ids)
             )
             
-            return doc_ids or []
+            return doc_ids
             
         except Exception as e:
             self.logger.error("Failed to add documents to database", error=str(e))
@@ -160,65 +110,22 @@ class DatabaseManager:
             True if deletion was successful
         """
         try:
-            await self._ensure_initialized()
+            if not filename or not filename.strip():
+                self.logger.warning("Empty filename provided for deletion")
+                return False
             
             self.logger.info("Starting document deletion", filename=filename)
             
-            # First, let's see what documents exist and their metadata
-            all_docs = self._db.similarity_search(query="", k=1000)
-            self.logger.info("Total documents in DB before deletion", count=len(all_docs))
+            # Use ChromaDB service to delete by filter
+            filter_criteria = {"filename": filename}
+            success = await self.chromadb.delete_documents_by_filter(filter_criteria)
             
-            # Find documents with matching filename
-            matching_docs = []
-            for doc in all_docs:
-                if doc.metadata.get('filename') == filename:
-                    matching_docs.append(doc)
-            
-            self.logger.info("Found matching documents", filename=filename, count=len(matching_docs))
-            
-            if not matching_docs:
-                self.logger.warning("No documents found for filename", filename=filename)
-                # Let's also log what filenames we do have
-                existing_filenames = [doc.metadata.get('filename', 'No filename') for doc in all_docs[:5]]
-                self.logger.info("Existing filenames (first 5)", filenames=existing_filenames)
-                return False
-            
-            # Extract document IDs for deletion
-            doc_ids = []
-            for doc in matching_docs:
-                # Try to get the document ID from metadata
-                if 'chunk_id' in doc.metadata:
-                    doc_ids.append(doc.metadata['chunk_id'])
-                elif hasattr(doc, 'id'):
-                    doc_ids.append(doc.id)
-            
-            self.logger.info("Extracting document IDs for deletion", filename=filename, ids_found=len(doc_ids))
-            
-            if doc_ids:
-                # Delete by IDs using ChromaDB client directly
-                try:
-                    # Access the underlying ChromaDB collection
-                    collection = self._db._collection
-                    collection.delete(ids=doc_ids)
-                    self.logger.info("Successfully deleted documents from ChromaDB", filename=filename, chunks_deleted=len(doc_ids))
-                except Exception as e:
-                    self.logger.error("Failed to delete from ChromaDB collection", filename=filename, error=str(e))
-                    # Fallback: try to delete by recreating the vector store without these documents
-                    return False
+            if success:
+                self.logger.info("Document deletion completed successfully", filename=filename)
             else:
-                self.logger.warning("No document IDs found for deletion", filename=filename)
-                return False
+                self.logger.warning("Document deletion failed or no documents found", filename=filename)
             
-            # Verify deletion worked
-            verification_docs = self._db.similarity_search(query="", k=1000)
-            remaining_matching = [doc for doc in verification_docs if doc.metadata.get('filename') == filename]
-            
-            if remaining_matching:
-                self.logger.error("Documents still exist after deletion attempt", filename=filename, remaining=len(remaining_matching))
-                return False
-            else:
-                self.logger.info("Document deletion verified successful", filename=filename)
-                return True
+            return success
             
         except Exception as e:
             self.logger.error(
@@ -230,27 +137,22 @@ class DatabaseManager:
     
     async def get_documents_summary(self) -> List[Dict[str, Any]]:
         """
-        Get summary of all documents in the database.
+        Get summary of all documents in the database with business logic formatting.
         
         Returns:
             List of document summaries with metadata
         """
         try:
-            await self._ensure_initialized()
-            
-            # Get all documents using similarity search
-            all_docs = self._db.similarity_search(
-                query="",  # Empty query to get all
-                k=1000     # Large number to get all docs
-            )
+            # Get all documents from ChromaDB service
+            all_docs = await self.chromadb.get_all_documents()
             
             if not all_docs:
                 return []
             
-            # Group by filename
+            # Business logic: Group by filename and format for UI
             documents = {}
             for doc in all_docs:
-                metadata = doc.metadata
+                metadata = doc.get('metadata', {})
                 filename = metadata.get('filename', 'Unknown')
                 
                 if filename not in documents:
@@ -265,8 +167,17 @@ class DatabaseManager:
                     }
                 
                 documents[filename]['chunk_count'] += 1
+                if 'chunk_id' in metadata:
+                    documents[filename]['chunk_ids'].append(metadata['chunk_id'])
             
-            return list(documents.values())
+            # Sort by upload timestamp (newest first)
+            document_list = list(documents.values())
+            document_list.sort(
+                key=lambda x: x.get('upload_timestamp', ''), 
+                reverse=True
+            )
+            
+            return document_list
             
         except Exception as e:
             self.logger.error("Failed to get documents summary", error=str(e))
@@ -280,13 +191,9 @@ class DatabaseManager:
             Total chunk count
         """
         try:
-            await self._ensure_initialized()
-            # Get approximate count using similarity search
-            all_docs = self._db.similarity_search(
-                query="",  # Empty query
-                k=10000    # Large number
-            )
-            return len(all_docs)
+            count = await self.chromadb.get_document_count()
+            self.logger.debug("Document count retrieved", count=count)
+            return count
             
         except Exception as e:
             self.logger.error("Failed to get document count", error=str(e))
@@ -300,7 +207,7 @@ class DatabaseManager:
         filters: Optional[Dict[str, Any]] = None
     ) -> List[Dict[str, Any]]:
         """
-        Search for similar documents using vector similarity.
+        Search for similar documents with business logic formatting.
         
         Args:
             query: Search query
@@ -312,96 +219,164 @@ class DatabaseManager:
             List of similar document chunks with scores
         """
         try:
-            await self._ensure_initialized()
-            
-            # Perform similarity search with scores
-            search_kwargs = {
-                "query": query,
-                "k": max_results
-            }
-            
-            # Only add filter if it's not None and not empty
-            if filters and isinstance(filters, dict) and filters:
-                search_kwargs["filter"] = filters
-                
-            docs_with_scores = self._db.similarity_search_with_score(**search_kwargs)
-            
-            if not docs_with_scores:
+            if not query or not query.strip():
+                self.logger.warning("Empty query provided for search")
                 return []
             
-            # Format results
-            search_results = []
-            for doc, score in docs_with_scores:
-                # Convert score (lower is more similar in some implementations)
-                similarity_score = 1.0 - min(score, 1.0)  # Normalize to 0-1 range
-                
-                # Apply score threshold
-                if similarity_score < score_threshold:
-                    continue
-                
-                result = {
-                    'content': doc.page_content,
-                    'metadata': doc.metadata,
-                    'score': similarity_score,
-                    'chunk_id': f"chunk_{hash(doc.page_content)}",
-                    'source': doc.metadata.get('filename', 'Unknown')
+            # Delegate to ChromaDB service
+            raw_results = await self.chromadb.search_similar(
+                query=query,
+                k=max_results,
+                score_threshold=score_threshold,
+                filter_metadata=filters
+            )
+            
+            # Business logic: Format results for document management UI
+            formatted_results = []
+            for result in raw_results:
+                formatted_result = {
+                    'content': result.get('content', ''),
+                    'metadata': result.get('metadata', {}),
+                    'score': result.get('score', 0.0),
+                    'chunk_id': result['metadata'].get('chunk_id', f"chunk_{hash(result.get('content', ''))}"),
+                    'source': result.get('source', 'Unknown'),
+                    'filename': result['metadata'].get('filename', 'Unknown'),
+                    'file_type': result['metadata'].get('file_type', 'unknown')
                 }
-                search_results.append(result)
+                formatted_results.append(formatted_result)
+            
+            # Sort by score (highest first)
+            formatted_results.sort(key=lambda x: x['score'], reverse=True)
             
             self.logger.info(
-                "Similarity search completed",
+                "Document search completed",
                 query_length=len(query),
-                results_found=len(search_results),
+                results_found=len(formatted_results),
                 max_results=max_results
             )
             
-            return search_results
+            return formatted_results
             
         except Exception as e:
-            self.logger.error("Similarity search failed", query=query, error=str(e))
+            self.logger.error("Document search failed", query=query[:100], error=str(e))
             return []
     
     async def health_check(self) -> Dict[str, Any]:
         """
-        Perform health check on the database.
+        Perform comprehensive health check on the database manager.
         
         Returns:
             Health status information
         """
         try:
-            await self._ensure_initialized()
+            # Get health status from ChromaDB service
+            chromadb_health = await self.chromadb.health_check()
             
-            # Test basic operations
-            count = await self.get_document_count()
+            # Add business logic health checks
+            document_count = await self.get_document_count()
+            
+            # Determine overall health
+            is_healthy = (
+                chromadb_health.get("status") == "healthy" and
+                self.chromadb.is_available()
+            )
             
             return {
-                "status": "healthy",
+                "status": "healthy" if is_healthy else "unhealthy",
                 "timestamp": datetime.now(timezone.utc).isoformat(),
-                "collection_name": "rag_documents",
-                "document_count": count,
-                "connection": "active"
+                "component": "database_manager",
+                "document_count": document_count,
+                "chromadb_service": chromadb_health,
+                "business_logic": {
+                    "settings_configured": bool(
+                        self.settings.chromadb_storage_path and
+                        self.settings.azure_openai_api_key and
+                        self.settings.azure_embedding_deployment
+                    )
+                }
             }
             
         except Exception as e:
             return {
                 "status": "unhealthy",
                 "timestamp": datetime.now(timezone.utc).isoformat(),
+                "component": "database_manager", 
                 "error": str(e),
-                "connection": "failed"
+                "chromadb_service": "unavailable"
             }
     
     def is_available(self) -> bool:
         """
-        Check if the database is available.
+        Check if the database manager is available for operations.
         
         Returns:
             True if database is ready for operations
         """
         try:
             return (
-                self.settings.chromadb_storage_path and 
-                self.settings.azure_openai_api_key and
-                self.settings.azure_embedding_deployment
+                self.chromadb.is_available() and
+                bool(self.settings.chromadb_storage_path) and 
+                bool(self.settings.azure_openai_api_key) and
+                bool(self.settings.azure_embedding_deployment)
             )
-        except Exception:
+        except Exception as e:
+            self.logger.warning("Database availability check failed", error=str(e))
             return False
+    
+    # Additional business logic methods
+    
+    async def get_unique_filenames(self) -> List[str]:
+        """
+        Get list of unique filenames in the database.
+        
+        Returns:
+            List of unique filenames
+        """
+        try:
+            documents_summary = await self.get_documents_summary()
+            filenames = [doc['filename'] for doc in documents_summary if doc['filename'] != 'Unknown']
+            return sorted(list(set(filenames)))
+            
+        except Exception as e:
+            self.logger.error("Failed to get unique filenames", error=str(e))
+            return []
+    
+    async def get_document_stats(self) -> Dict[str, Any]:
+        """
+        Get comprehensive document statistics.
+        
+        Returns:
+            Document statistics
+        """
+        try:
+            documents_summary = await self.get_documents_summary()
+            total_chunks = await self.get_document_count()
+            
+            # Calculate statistics
+            total_files = len(documents_summary)
+            total_size = sum(doc.get('size_bytes', 0) for doc in documents_summary)
+            
+            file_types = {}
+            for doc in documents_summary:
+                file_type = doc.get('file_type', 'unknown')
+                file_types[file_type] = file_types.get(file_type, 0) + 1
+            
+            return {
+                "total_files": total_files,
+                "total_chunks": total_chunks,
+                "total_size_bytes": total_size,
+                "total_size_mb": round(total_size / (1024 * 1024), 2),
+                "file_types": file_types,
+                "average_chunks_per_file": round(total_chunks / max(total_files, 1), 1)
+            }
+            
+        except Exception as e:
+            self.logger.error("Failed to get document statistics", error=str(e))
+            return {
+                "total_files": 0,
+                "total_chunks": 0,
+                "total_size_bytes": 0,
+                "total_size_mb": 0.0,
+                "file_types": {},
+                "average_chunks_per_file": 0.0
+            }

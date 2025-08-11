@@ -14,6 +14,8 @@ Used by: Streamlit UI, admin tools, document APIs, bulk operations
 from .document_manager import DocumentManager
 from .document_models import DocumentInfo, DocumentStats, UploadResult, DeleteResult, DocumentStatus
 from .database_manager import DatabaseManager
+from .chromadb_service import ChromaDBService
+from .document_processor import DocumentProcessor
 
 __all__ = [
     'DocumentManager',
@@ -22,5 +24,7 @@ __all__ = [
     'UploadResult',
     'DeleteResult', 
     'DocumentStatus',
-    'DatabaseManager'
+    'DatabaseManager',
+    'ChromaDBService',
+    'DocumentProcessor'
 ]

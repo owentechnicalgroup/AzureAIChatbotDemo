@@ -17,7 +17,7 @@ from docx import Document as DocxDocument
 from langchain.text_splitter import RecursiveCharacterTextSplitter
 from langchain_core.documents import Document as LangChainDocument
 
-from config.settings import Settings
+from src.config.settings import Settings
 
 logger = structlog.get_logger(__name__)
 

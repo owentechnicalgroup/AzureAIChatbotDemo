@@ -1,18 +1,19 @@
 """
-RAG (Retrieval-Augmented Generation) module for document processing and vector search.
+RAG (Retrieval-Augmented Generation) data models.
 
-This module provides:
-- Document processing and chunking
-- ChromaDB vector storage management
-- Document retrieval and similarity search
-- Integration with Azure OpenAI embeddings
+This module provides core data models for RAG operations:
+- Document metadata and processing status models  
+- Query and response data structures
+- Chunk representation for document fragments
+
+Implementation classes have been moved to:
+- src/document_management/ - Document lifecycle and storage
+- src/rag_access/ - AI access and search operations
 """
 
-from typing import TYPE_CHECKING
-
-# Core data models
+from typing import TYPE_CHECKING, Any
 from pydantic import BaseModel, Field
-from typing import List, Optional, Dict, Any, TYPE_CHECKING
+from typing import List, Optional, Dict
 from datetime import datetime
 
 # Import LangChain Document for type hints
@@ -51,51 +52,16 @@ class RAGQuery(BaseModel):
     use_general_knowledge: bool = Field(default=False, description="Allow AI to use general knowledge as fallback")
 
 class RAGResponse(BaseModel):
-    """RAG response with sources and metadata - now using LangChain documents."""
+    """RAG response with sources and metadata."""
     answer: str = Field(..., description="Generated response")
     sources: List[str] = Field(default_factory=list, description="Source references")
     retrieved_chunks: List[Any] = Field(default_factory=list, description="Retrieved LangChain document chunks")
     confidence_score: float = Field(..., description="Response confidence 0-1")
     token_usage: Dict[str, Any] = Field(default_factory=dict)
 
-# Conditional imports for implementation classes
-if TYPE_CHECKING:
-    from .document_processor import DocumentProcessor
-    from .chromadb_manager import ChromaDBManager
-    from .retriever import RAGRetriever
-    from .rag_tool import RAGSearchTool
-    from .langchain_tools import (
-        CallReportDataTool,
-        BankLookupTool, 
-        LangChainToolRegistry,
-        create_langchain_tool_registry,
-        get_langchain_tools_for_agent
-    )
-    from langchain_core.documents import Document as LangChainDocument
-else:
-    # Runtime imports
-    try:
-        from .document_processor import DocumentProcessor
-        from .chromadb_manager import ChromaDBManager
-        from .retriever import RAGRetriever
-        from .rag_tool import RAGSearchTool
-        from .langchain_tools import (
-            CallReportDataTool,
-            BankLookupTool, 
-            LangChainToolRegistry,
-            create_langchain_tool_registry,
-            get_langchain_tools_for_agent
-        )
-    except ImportError:
-        # Handle missing dependencies gracefully
-        pass
-
 __all__ = [
     'DocumentChunk',
     'Document', 
     'RAGQuery',
     'RAGResponse',
-    'DocumentProcessor',
-    'ChromaDBManager',
-    'RAGRetriever',
 ]

@@ -92,7 +92,7 @@ class DocumentManager:
             )
             
             # Import here to avoid circular imports
-            from src.rag.document_processor import DocumentProcessor
+            from .document_processor import DocumentProcessor
             
             # Process the document into chunks
             processor = DocumentProcessor(self.settings)
