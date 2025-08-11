@@ -14,8 +14,8 @@ from io import BytesIO
 import sys
 sys.path.append(str(Path(__file__).parent.parent / "src"))
 
-from rag.document_processor import DocumentProcessor
-from rag import Document, DocumentChunk
+from document_management.document_processor import DocumentProcessor
+from document_management import Document, DocumentChunk
 from config.settings import Settings
 
 
