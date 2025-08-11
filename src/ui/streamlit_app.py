@@ -80,6 +80,13 @@ class FlexibleRAGStreamlitApp:
                 self.logger.warning("Banking tools not available", error=str(e))
             st.session_state.banking_tools = banking_tools
         
+        # UI control state
+        if "use_general_knowledge" not in st.session_state:
+            st.session_state.use_general_knowledge = False  # Default to strict mode
+        
+        if "show_sources" not in st.session_state:
+            st.session_state.show_sources = True
+
         # ChatbotAgent with flexible configuration
         if "chatbot_agent" not in st.session_state:
             self._create_chatbot_agent()
@@ -94,13 +101,6 @@ class FlexibleRAGStreamlitApp:
         # Document state
         if "uploaded_documents" not in st.session_state:
             st.session_state.uploaded_documents = []
-        
-        # UI control state
-        if "use_general_knowledge" not in st.session_state:
-            st.session_state.use_general_knowledge = False  # Default to strict mode
-        
-        if "show_sources" not in st.session_state:
-            st.session_state.show_sources = True
     
     def _create_chatbot_agent(self):
         """Create or recreate the chatbot agent with current settings."""
@@ -114,12 +114,19 @@ class FlexibleRAGStreamlitApp:
         # Add banking tools
         all_tools.extend(st.session_state.banking_tools)
         
-        # Create agent with standard configuration
+        # Create agent with user's general knowledge preference
         st.session_state.chatbot_agent = ChatbotAgent(
             settings=self.settings,
             tools=all_tools,
             enable_multi_step=True,
+            use_general_knowledge=st.session_state.use_general_knowledge,  # Pass preference to agent
             conversation_id=st.session_state.get('conversation_id', str(uuid.uuid4()))
+        )
+        
+        self.logger.info(
+            "ChatbotAgent created",
+            tool_count=len(all_tools),
+            use_general_knowledge=st.session_state.use_general_knowledge
         )
     
     def _get_rag_mode_description(self) -> str:
@@ -174,10 +181,11 @@ class FlexibleRAGStreamlitApp:
                     key="general_knowledge_toggle"
                 )
                 
-                # If the setting changed, update the RAG tool configuration
+                # If the setting changed, recreate the agent with new preference
                 if new_general_knowledge != st.session_state.use_general_knowledge:
                     st.session_state.use_general_knowledge = new_general_knowledge
-                    # Note: We'll apply this setting when making RAG queries
+                    self._create_chatbot_agent()  # Recreate agent with new preference
+                    st.success(f"Switched to {'Hybrid' if new_general_knowledge else 'Document-Only'} mode")
             
             with col2:
                 # RAG tool status
@@ -269,19 +277,22 @@ class FlexibleRAGStreamlitApp:
             self._handle_chat_input(prompt)
     
     def _handle_chat_input(self, prompt: str):
-        """Handle user chat input with flexible RAG mode."""
+        """Handle user chat input - let agent control everything."""
         # Add user message
         st.session_state.messages.append({"role": "user", "content": prompt})
         
         with st.chat_message("user"):
             st.markdown(prompt)
         
-        # Generate response
+        # Generate response using agent
         with st.chat_message("assistant"):
             with st.spinner("Thinking..." if st.session_state.use_general_knowledge else "Searching documents only..."):
                 try:
-                    # For the flexible mode, we'll use a custom approach
-                    response_data = self._generate_flexible_response(prompt)
+                    # Let agent handle everything - no more direct RAG tool calls
+                    response_data = st.session_state.chatbot_agent.process_message(
+                        user_message=prompt,
+                        conversation_id=st.session_state.conversation_id
+                    )
                     
                     # Extract response content and metadata
                     response_content = response_data.get('content', 'I apologize, but I couldn\'t generate a response.')
@@ -292,17 +303,20 @@ class FlexibleRAGStreamlitApp:
                     # Display response
                     st.markdown(response_content)
                     
-                    # Show processing mode info
-                    if st.session_state.use_general_knowledge:
+                    # Show processing mode info based on agent response
+                    if processing_mode == "agent_rag_documents":
+                        st.success("📚 Agent found relevant documents and used them")
+                    elif processing_mode == "agent_rag_general_knowledge":
+                        st.info("🧠 Agent used general knowledge (no relevant documents found)")
+                    elif processing_mode == "agent_rag_no_context":
+                        st.warning("🔒 Agent found no documents and general knowledge is disabled")
+                    elif processing_mode == "multi-step":
                         if used_documents:
-                            st.success("📚 Found relevant documents and used them for the response")
+                            st.success("📚 Used documents")
                         else:
-                            st.info("🧠 No relevant documents found, used general knowledge")
+                            st.info("🧠 Used general knowledge")
                     else:
-                        if used_documents:
-                            st.success("📚 Response based on uploaded documents")
-                        else:
-                            st.warning("🔒 No relevant documents found, cannot provide general knowledge")
+                        st.info(f"ℹ️ Processing mode: {processing_mode}")
                     
                     # Store message with metadata
                     st.session_state.messages.append({
@@ -321,132 +335,58 @@ class FlexibleRAGStreamlitApp:
                         "content": error_msg,
                         "processing_mode": "error"
                     })
-    
-    def _generate_flexible_response(self, prompt: str) -> Dict[str, Any]:
-        """Generate response with flexible RAG mode control."""
+
+    def _test_document_query(self):
+        """Test with a document-specific query using agent."""
+        test_prompt = "What documents are available in the knowledge base?"
+        st.info(f"Testing with: '{test_prompt}'")
+        
         try:
-            if st.session_state.use_general_knowledge:
-                # Hybrid mode: Try documents first, fall back to general knowledge
-                return self._generate_hybrid_response(prompt)
-            else:
-                # Strict mode: Documents only
-                return self._generate_strict_response(prompt)
-                
-        except Exception as e:
-            return {
-                "content": f"I encountered an error: {str(e)}",
-                "processing_mode": "error",
-                "used_documents": False,
-                "sources": []
-            }
-    
-    def _generate_hybrid_response(self, prompt: str) -> Dict[str, Any]:
-        """Generate response in hybrid mode (documents + general knowledge)."""
-        # Try RAG tool with general knowledge enabled in hybrid mode
-        try:
-            rag_result = asyncio.run(st.session_state.rag_tool._arun(
-                query=prompt,
-                max_chunks=3,
-                use_general_knowledge=True  # Enable general knowledge for hybrid mode
-            ))
-            
-            # The key insight: with my SearchService fix, when using general knowledge
-            # with low-relevance docs, the response WON'T contain "Sources used" 
-            # because the SearchService filters them out
-            has_relevant_documents = "Sources used" in rag_result
-            
-            # Extract sources only if they were actually included in the response
-            sources = []
-            if has_relevant_documents:
-                sources = self._extract_sources_from_rag_result(rag_result)
-            
-            return {
-                "content": rag_result,
-                "processing_mode": "hybrid_documents_found" if has_relevant_documents else "hybrid_general_knowledge", 
-                "used_documents": has_relevant_documents,
-                "sources": sources
-            }
-                
-        except Exception as e:
-            # Fallback to agent
-            response_data = st.session_state.chatbot_agent.process_message(
-                user_message=prompt,
+            # Use agent for testing too
+            response = st.session_state.chatbot_agent.process_message(
+                user_message=test_prompt,
                 conversation_id=st.session_state.conversation_id
             )
             
-            return {
-                "content": response_data.get('content', ''),
-                "processing_mode": "hybrid_fallback",
-                "used_documents": False,
-                "sources": []
-            }
-    
-    def _generate_strict_response(self, prompt: str) -> Dict[str, Any]:
-        """Generate response in strict mode (documents only)."""
-        try:
-            # Use RAG tool with strict settings
-            rag_result = asyncio.run(st.session_state.rag_tool._arun(
-                query=prompt,
-                max_chunks=3,
-                use_general_knowledge=False  # Never use general knowledge
-            ))
-            
-            # Check if we found documents by looking for sources
-            has_documents = "Sources used" in rag_result or "• " in rag_result
-            
-            if has_documents:
-                sources = self._extract_sources_from_rag_result(rag_result)
-                return {
-                    "content": rag_result,
-                    "processing_mode": "strict_documents_found", 
-                    "used_documents": True,
-                    "sources": sources
-                }
-            else:
-                # No documents found, provide strict refusal
-                return {
-                    "content": (
-                        f"I don't have relevant documents in my knowledge base to answer your question about '{prompt}'. "
-                        f"I'm in document-only mode and cannot provide general knowledge responses. "
-                        f"Please upload relevant documents or enable general knowledge mode if you want broader answers."
-                    ),
-                    "processing_mode": "strict_no_documents",
-                    "used_documents": False,
-                    "sources": []
-                }
+            with st.expander("📊 Test Result", expanded=True):
+                st.write(f"**Mode**: {response['processing_mode']}")
+                st.write(f"**Used Documents**: {response['used_documents']}")
+                st.write(f"**Sources**: {len(response.get('sources', []))}")
+                st.text_area("Response", response['content'], height=150)
                 
         except Exception as e:
-            return {
-                "content": (
-                    f"I encountered an error while searching documents: {str(e)}. "
-                    f"I cannot provide general knowledge responses in document-only mode."
-                ),
-                "processing_mode": "strict_error",
-                "used_documents": False,
-                "sources": []
-            }
+            st.error(f"Test failed: {str(e)}")
     
-    def _extract_sources_from_rag_result(self, rag_result: str) -> List[str]:
-        """Extract sources from RAG result text."""
-        sources = []
-        lines = rag_result.split('\n')
+    def _test_general_knowledge_query(self):
+        """Test with a general knowledge query using agent."""
+        test_prompt = "What is the capital of France?"
+        st.info(f"Testing with: '{test_prompt}' (should not find documents)")
+        st.info(f"Agent configured for: {'Hybrid Mode' if st.session_state.use_general_knowledge else 'Document-Only Mode'}")
         
-        in_sources = False
-        for line in lines:
-            if 'Sources used' in line or 'sources found' in line.lower():
-                in_sources = True
-                continue
-            elif in_sources and line.strip().startswith('•'):
-                sources.append(line.strip())
-            elif in_sources and not line.strip():
-                break
-        
-        return sources
-    
-    def _test_document_query(self):
-        """Test with a document-specific query."""
-        test_prompt = "What documents are available in the knowledge base?"
-        st.info(f"Testing with: '{test_prompt}'")
+        try:
+            # Use agent for testing
+            response = st.session_state.chatbot_agent.process_message(
+                user_message=test_prompt,
+                conversation_id=st.session_state.conversation_id
+            )
+            
+            with st.expander("📊 Test Result", expanded=True):
+                st.write(f"**Mode**: {response['processing_mode']}")
+                st.write(f"**Used Documents**: {response['used_documents']}")
+                st.write(f"**Sources**: {len(response.get('sources', []))}")
+                st.write(f"**Agent Config**: {st.session_state.use_general_knowledge}")
+                
+                if response['processing_mode'] == "agent_rag_documents":
+                    st.success("✅ Agent found documents and used them")
+                elif response['processing_mode'] == "agent_rag_general_knowledge":
+                    st.info("ℹ️ Agent used general knowledge (no documents found)")
+                elif response['processing_mode'] == "agent_rag_no_context":
+                    st.warning("⚠️ Agent found no documents and refused general knowledge")
+                
+                st.text_area("Response", response['content'], height=150)
+                
+        except Exception as e:
+            st.error(f"Test failed: {str(e)}")
         
         try:
             response = self._generate_flexible_response(test_prompt)

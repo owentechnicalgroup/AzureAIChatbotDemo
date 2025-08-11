@@ -3,6 +3,7 @@ Simplified Azure OpenAI chatbot agent following Azure development best practices
 Uses LangChain's native features with optional RAG tool integration for multi-step conversations.
 """
 
+import os
 import time
 import uuid
 from typing import Dict, List, Any, Optional
@@ -57,7 +58,8 @@ class ChatbotAgent:
         prompt_type: Optional[str] = None,
         persistence_file: Optional[str] = None,
         tools: Optional[List[Any]] = None,
-        enable_multi_step: bool = False
+        enable_multi_step: bool = False,
+        use_general_knowledge: bool = False
     ):
         """Initialize Azure OpenAI agent with LangChain native features and optional RAG tools."""
         self.settings = settings
@@ -65,6 +67,7 @@ class ChatbotAgent:
         self.persistence_file = persistence_file
         self.tools = tools or []
         self.enable_multi_step = enable_multi_step and len(self.tools) > 0
+        self.use_general_knowledge = use_general_knowledge  # Store user preference
         
         # Azure observability setup
         self.logger = logger.bind(
@@ -72,7 +75,8 @@ class ChatbotAgent:
             conversation_id=self.conversation_id,
             component="chatbot_agent",
             multi_step_enabled=self.enable_multi_step,
-            tool_count=len(self.tools)
+            tool_count=len(self.tools),
+            use_general_knowledge=use_general_knowledge
         )
         
         # Initialize Azure OpenAI via LangChain
@@ -216,13 +220,20 @@ Always explain your reasoning when using tools and cite sources when applicable.
         Process user message using either simple chain or multi-step agent executor.
         
         Routes between conversation chain and agent executor based on enable_multi_step flag.
+        Also handles agent-controlled RAG behavior based on use_general_knowledge setting.
         """
         if not user_message.strip():
             return self._error_response("Please provide a message.")
-        
+
         start_time = time.time()
         
         try:
+            # Check if we have RAG tool and should handle directly
+            rag_tool = self._get_rag_tool()
+            if rag_tool and rag_tool.is_available:
+                return self._handle_with_rag_tool(user_message, rag_tool, start_time)
+            
+            # Fall back to original behavior if no RAG tool
             if self.enable_multi_step and self.agent_executor:
                 # Multi-step mode: Use agent executor with RAG tools
                 self.logger.info("Processing with multi-step agent executor")
@@ -263,7 +274,9 @@ Always explain your reasoning when using tools and cite sources when applicable.
                 'message_count': self._message_count,
                 'response_time': response_time,
                 'processing_mode': processing_mode,
-                'timestamp': datetime.now(timezone.utc).isoformat()
+                'timestamp': datetime.now(timezone.utc).isoformat(),
+                'used_documents': False,  # Not RAG-based
+                'sources': []
             }
             
         except Exception as e:
@@ -332,6 +345,179 @@ Always explain your reasoning when using tools and cite sources when applicable.
         except Exception as e:
             yield self._error_response(f"Streaming error: {str(e)}")
     
+    def _get_rag_tool(self):
+        """Get RAG tool from available tools."""
+        for tool in self.tools:
+            if hasattr(tool, 'is_available') and tool.__class__.__name__ == 'RAGSearchTool':
+                return tool
+        return None
+    
+    def _handle_with_rag_tool(self, user_message: str, rag_tool, start_time: float) -> Dict[str, Any]:
+        """
+        Handle message using RAG tool with agent-controlled settings.
+        
+        Args:
+            user_message: User's message
+            rag_tool: Available RAG tool
+            start_time: Processing start time
+            
+        Returns:
+            Structured response
+        """
+        try:
+            self.logger.info("Processing with agent-controlled RAG tool")
+            
+            # Agent makes the RAG tool call with stored preference
+            import asyncio
+            rag_result = asyncio.run(rag_tool._arun(
+                query=user_message,
+                max_chunks=3,
+                use_general_knowledge=self.use_general_knowledge  # Agent controls this
+            ))
+            
+            # Agent processes the result and returns structured response
+            return self._process_rag_result(rag_result, user_message, start_time)
+            
+        except Exception as e:
+            self.logger.error("RAG tool error", error=str(e))
+            return {
+                "content": f"I encountered an error searching for information: {str(e)}",
+                "processing_mode": "rag_error",
+                "used_documents": False,
+                "sources": [],
+                "conversation_id": self.conversation_id,
+                "response_time": time.time() - start_time,
+                "timestamp": datetime.now(timezone.utc).isoformat()
+            }
+    
+    def _process_rag_result(self, rag_result: str, user_message: str, start_time: float) -> Dict[str, Any]:
+        """
+        Process RAG result and return structured response.
+        
+        Args:
+            rag_result: Result from RAG tool
+            user_message: Original user message
+            start_time: Processing start time
+            
+        Returns:
+            Structured response with metadata
+        """
+        # Check if documents were actually used by looking for source indicators
+        has_source_section = "Sources used" in rag_result or "• " in rag_result
+        sources = self._extract_individual_sources_from_response(rag_result) if has_source_section else []
+        
+        # Check if any documents have high enough relevance scores to be considered "used"
+        high_relevance_docs = False
+        if has_source_section and sources:
+            # Parse relevance scores from source lines (for legacy format)
+            import re
+            for source in sources:
+                # Look for relevance scores in format "• filename (relevance: 0.75)"
+                relevance_match = re.search(r'relevance:\s*([0-9.]+)', source)
+                if relevance_match:
+                    score = float(relevance_match.group(1))
+                    if score > 0.35:  # Lowered threshold for "relevant" documents
+                        high_relevance_docs = True
+                        break
+            
+            # If no relevance scores found but sources are present, check if AI actually used them
+            if not high_relevance_docs and sources:
+                # Look for indicators that the AI found and used relevant information
+                no_info_indicators = [
+                    "I'm sorry, but",
+                    "I don't have information",
+                    "There is no information", 
+                    "None of the provided documents contain",
+                    "I am unable to answer",
+                    "I cannot answer",
+                    "no relevant information",
+                    "not mentioned in provided documents"
+                ]
+                
+                response_has_no_info = any(indicator.lower() in rag_result.lower() 
+                                         for indicator in no_info_indicators)
+                
+                # If AI provided substantive content (not a "no info" response), consider docs used
+                if not response_has_no_info and len(rag_result.strip()) > 100:
+                    high_relevance_docs = True
+        
+        # Determine processing mode based on actual document relevance and agent configuration
+        if high_relevance_docs:
+            processing_mode = "agent_rag_documents"
+            has_documents = True
+        elif self.use_general_knowledge:
+            processing_mode = "agent_rag_general_knowledge" 
+            has_documents = False
+        else:
+            processing_mode = "agent_rag_no_context"
+            has_documents = False
+        
+        response_time = time.time() - start_time
+        self._message_count += 1
+        
+        self.logger.info(
+            "RAG result processed",
+            processing_mode=processing_mode,
+            used_documents=has_documents,
+            sources_count=len(sources),
+            response_time=response_time
+        )
+        
+        return {
+            "content": rag_result,
+            "processing_mode": processing_mode,
+            "used_documents": has_documents,
+            "sources": sources,
+            "conversation_id": self.conversation_id,
+            "message_count": self._message_count,
+            "response_time": response_time,
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "agent_config": {
+                "use_general_knowledge": self.use_general_knowledge,
+                "enable_multi_step": self.enable_multi_step
+            }
+        }
+    def _extract_sources_from_result(self, rag_result: str) -> List[str]:
+        """Extract sources from RAG result text."""
+        sources = []
+        lines = rag_result.split('\n')
+        
+        in_sources = False
+        for line in lines:
+            # Look for various source section indicators
+            if ('Sources used' in line or 'sources found' in line.lower() or 
+                'Sources:' in line or line.strip().startswith('Sources')):
+                in_sources = True
+                continue
+            elif in_sources and line.strip().startswith('•'):
+                sources.append(line.strip())
+            elif in_sources and line.strip().startswith('-'):
+                # Handle dash-style bullet points too
+                sources.append(line.strip())
+            elif in_sources and not line.strip():
+                # Empty line might end the sources section
+                continue
+            elif in_sources and line.strip() and not line.strip().startswith('•') and not line.strip().startswith('-'):
+                # Non-bullet content after sources section - stop extracting
+                break
+        
+        return sources
+   
+    def _extract_individual_sources_from_response(self, rag_result: str) -> List[str]:
+        """Simply extract sources as they appear in the AI response."""
+        # Just use the standard source extraction - let the AI format show through naturally
+        return self._extract_sources_from_result(rag_result)
+    
+    def update_general_knowledge_preference(self, use_general_knowledge: bool):
+        """
+        Update the agent's general knowledge preference.
+        
+        Args:
+            use_general_knowledge: New preference setting
+        """
+        self.use_general_knowledge = use_general_knowledge
+        self.logger.info("Updated general knowledge preference", use_general_knowledge=use_general_knowledge)
+
     def _handle_error(self, error: Exception, user_message: str, response_time: float) -> Dict[str, Any]:
         """Simplified error handling - Azure pattern."""
         chatbot_error = handle_error(error)

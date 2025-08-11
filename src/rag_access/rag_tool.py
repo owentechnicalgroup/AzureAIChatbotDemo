@@ -125,7 +125,11 @@ class RAGSearchTool(BaseTool):
             response = await self._search_service.search_and_generate(rag_query, context)
             
             # Format response for LangChain
-            if response.has_sources:
+            # Only show sources if they were actually used AND not already included in response
+            if (response.has_sources and 
+                self._response_actually_used_sources(response.content) and 
+                not self._response_already_has_sources(response.content)):
+                
                 source_info = f"\n\nSources used ({response.source_count}):\n"
                 for i, source in enumerate(response.sources, 1):
                     source_info += f"• {source.source} (relevance: {source.score:.2f})\n"
@@ -181,3 +185,72 @@ class RAGSearchTool(BaseTool):
                 "available": False,
                 "error": str(e)
             }
+    
+    def _response_actually_used_sources(self, response_content: str) -> bool:
+        """
+        Determine if the AI response actually used the retrieved sources.
+        
+        Args:
+            response_content: The AI's response text
+            
+        Returns:
+            bool: True if sources were actually used, False otherwise
+        """
+        # Keywords that indicate the AI couldn't find relevant information
+        no_info_indicators = [
+            "I'm sorry, but",
+            "I don't have information",
+            "There is no information",
+            "None of the provided documents contain",
+            "I am unable to answer",
+            "I cannot answer",
+            "no relevant information",
+            "not mentioned in provided documents",
+            "The documents do not contain"
+        ]
+        
+        response_lower = response_content.lower()
+        
+        # If response contains indicators that no relevant info was found, sources weren't used
+        for indicator in no_info_indicators:
+            if indicator.lower() in response_lower:
+                return False
+        
+        # If we get here, the response likely used the sources
+        return True
+    
+    def _response_already_has_sources(self, response_content: str) -> bool:
+        """
+        Check if the AI response already includes source citations.
+        
+        Args:
+            response_content: The AI's response text
+            
+        Returns:
+            bool: True if sources are already included in the response, False otherwise
+        """
+        # Look for various source citation formats that the AI might use
+        source_indicators = [
+            "Sources used:",
+            "Sources:",
+            "[Source",
+            "Based on:",
+            "According to:",
+            "From the documents:",
+            "• ", # Bullet points often indicate sources
+            "- ", # Dash points often indicate sources
+        ]
+        
+        # Check if response contains any source indicators
+        for indicator in source_indicators:
+            if indicator in response_content:
+                return True
+        
+        # Check for document references (filename patterns)
+        import re
+        # Look for patterns like "filename.docx", "filename.pdf", etc.
+        doc_pattern = r'\b\w+\.(docx|pdf|txt|doc|xlsx)\b'
+        if re.search(doc_pattern, response_content, re.IGNORECASE):
+            return True
+        
+        return False

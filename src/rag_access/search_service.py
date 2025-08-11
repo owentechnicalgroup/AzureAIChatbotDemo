@@ -103,22 +103,10 @@ class SearchService:
             # Calculate processing time
             processing_time = (datetime.now(timezone.utc) - start_time).total_seconds()
             
-            # Determine whether to include sources based on processing mode and quality
-            sources_to_include = search_results
-            
-            # If using general knowledge and documents have low relevance, don't include sources
-            if query.use_general_knowledge and search_results:
-                high_relevance_threshold = 0.6  # Only include sources with high relevance
-                high_quality_sources = [s for s in search_results if s.score >= high_relevance_threshold]
-                
-                # If no high-quality sources and we're using general knowledge, don't show sources
-                if not high_quality_sources and processing_mode in ["hybrid", "general_knowledge"]:
-                    sources_to_include = []
-            
-            # Create response
+            # Always include all search results - let UI decide what to show
             response = RAGResponse(
                 content=response_content,
-                sources=sources_to_include,
+                sources=search_results,  # Always include what we found
                 query=query.query,
                 processing_mode=processing_mode,
                 metadata={
@@ -129,8 +117,8 @@ class SearchService:
                         "use_general_knowledge": query.use_general_knowledge
                     },
                     "context": context.__dict__ if context else None,
-                    "original_sources_found": len(search_results),
-                    "sources_included": len(sources_to_include)
+                    "documents_found": len(search_results),
+                    "avg_relevance_score": sum(s.score for s in search_results) / len(search_results) if search_results else 0
                 }
             )
             
@@ -205,6 +193,8 @@ class SearchService:
         """
         Generate AI response using search results as context.
         
+        This is where the prompt switching happens based on use_general_knowledge flag.
+        
         Args:
             query: Original RAG query
             search_results: Document search results
@@ -213,47 +203,56 @@ class SearchService:
             Generated response content
         """
         try:
-            # Prepare system prompt
-            system_prompt = RAGPrompts.get_system_prompt(query.use_general_knowledge)
-            
-            # Format context prompt
-            sources_data = []
-            for result in search_results:
-                sources_data.append({
-                    'content': result.content,
-                    'source': result.source,
-                    'score': result.score
-                })
-            
+            # Determine the appropriate system prompt based on search results and flag
             if search_results:
-                user_prompt = RAGPrompts.format_context_prompt(sources_data, query.query)
+                # We have documents - choose system prompt based on use_general_knowledge flag
+                if query.use_general_knowledge:
+                    system_prompt = RAGPrompts.get_system_prompt_with_general_knowledge()
+                    self.logger.info("Using hybrid mode prompt (documents + general knowledge allowed)")
+                else:
+                    system_prompt = RAGPrompts.get_system_prompt_document_only()
+                    self.logger.info("Using document-only mode prompt")
+                
+                # Build context from search results
+                context_prompt = RAGPrompts.build_context_prompt(search_results)
+                
             else:
-                user_prompt = RAGPrompts.get_no_context_prompt(
-                    query.query, 
-                    query.use_general_knowledge
-                )
+                # No documents found - behavior depends on flag
+                if query.use_general_knowledge:
+                    system_prompt = RAGPrompts.get_system_prompt_general_knowledge_only()
+                    context_prompt = "No relevant documents found. You may use your general knowledge to help answer the question."
+                    self.logger.info("Using general knowledge only prompt (no documents found)")
+                else:
+                    # Return early with "no documents" response - don't call AI
+                    self.logger.info("No documents found and general knowledge disabled - returning standard response")
+                    return RAGPrompts.get_no_documents_response(query.query)
             
-            # Generate response with Azure OpenAI
+            # Generate response with selected prompts
+            messages = [
+                {"role": "system", "content": system_prompt},
+                {"role": "system", "content": context_prompt},
+                {"role": "user", "content": query.query}
+            ]
+            
+            self.logger.info("Generating AI response", prompt_type=system_prompt[:50])
+            
             response = await self.openai_client.chat.completions.create(
                 model=self.settings.azure_openai_deployment,
-                messages=[
-                    {"role": "system", "content": system_prompt},
-                    {"role": "user", "content": user_prompt}
-                ],
+                messages=messages,
                 temperature=0.3,
                 max_tokens=1500
             )
             
-            content = response.choices[0].message.content
+            generated_content = response.choices[0].message.content
             
             self.logger.info(
-                "AI response generated",
+                "AI response generated successfully",
                 query=query.query,
                 sources_used=len(search_results),
                 tokens_used=response.usage.total_tokens if response.usage else 0
             )
             
-            return content
+            return generated_content
             
         except Exception as e:
             self.logger.error("AI response generation failed", query=query.query, error=str(e))
@@ -275,15 +274,11 @@ class SearchService:
             Processing mode string
         """
         if search_results:
-            if use_general_knowledge:
-                return "hybrid"
-            else:
-                return "document_based"
+            # We found documents - AI will use them (and maybe general knowledge if enabled)
+            return "document_based" if not use_general_knowledge else "hybrid"
         else:
-            if use_general_knowledge:
-                return "general_knowledge"
-            else:
-                return "no_context"
+            # No documents found
+            return "general_knowledge" if use_general_knowledge else "no_context"
     
     async def search_refinement_suggestions(self, query: str) -> Dict[str, Any]:
         """

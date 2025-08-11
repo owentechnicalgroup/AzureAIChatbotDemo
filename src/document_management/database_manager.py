@@ -223,12 +223,15 @@ class DatabaseManager:
                 self.logger.warning("Empty query provided for search")
                 return []
             
+            # ChromaDB doesn't accept empty filter dict, pass None instead
+            search_filters = filters if filters else None
+            
             # Delegate to ChromaDB service
             raw_results = await self.chromadb.search_similar(
                 query=query,
                 k=max_results,
                 score_threshold=score_threshold,
-                filter_metadata=filters
+                filter_metadata=search_filters
             )
             
             # Business logic: Format results for document management UI

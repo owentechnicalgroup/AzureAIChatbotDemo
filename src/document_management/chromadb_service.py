@@ -423,7 +423,7 @@ class ChromaDBService:
             results = collection.get(
                 limit=limit,
                 offset=offset,
-                include=['documents', 'metadatas', 'ids']
+                include=['documents', 'metadatas']  # 'ids' is returned by default
             )
             
             # Format results
