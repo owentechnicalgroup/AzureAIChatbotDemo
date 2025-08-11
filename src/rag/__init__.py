@@ -12,8 +12,15 @@ from typing import TYPE_CHECKING
 
 # Core data models
 from pydantic import BaseModel, Field
-from typing import List, Optional, Dict, Any
+from typing import List, Optional, Dict, Any, TYPE_CHECKING
 from datetime import datetime
+
+# Import LangChain Document for type hints
+if TYPE_CHECKING:
+    from langchain_core.documents import Document as LangChainDocument
+else:
+    # Runtime fallback - Pydantic will handle validation
+    LangChainDocument = Any
 
 class DocumentChunk(BaseModel):
     """Individual document chunk with metadata."""
@@ -44,18 +51,44 @@ class RAGQuery(BaseModel):
     use_general_knowledge: bool = Field(default=False, description="Allow AI to use general knowledge as fallback")
 
 class RAGResponse(BaseModel):
-    """RAG response with sources and metadata."""
+    """RAG response with sources and metadata - now using LangChain documents."""
     answer: str = Field(..., description="Generated response")
     sources: List[str] = Field(default_factory=list, description="Source references")
-    retrieved_chunks: List[DocumentChunk] = Field(default_factory=list)
+    retrieved_chunks: List[Any] = Field(default_factory=list, description="Retrieved LangChain document chunks")
     confidence_score: float = Field(..., description="Response confidence 0-1")
-    token_usage: Dict[str, int] = Field(default_factory=dict)
+    token_usage: Dict[str, Any] = Field(default_factory=dict)
 
 # Conditional imports for implementation classes
 if TYPE_CHECKING:
     from .document_processor import DocumentProcessor
-    from .vector_store import ChromaDBManager
+    from .chromadb_manager import ChromaDBManager
     from .retriever import RAGRetriever
+    from .rag_tool import RAGSearchTool
+    from .langchain_tools import (
+        CallReportDataTool,
+        BankLookupTool, 
+        LangChainToolRegistry,
+        create_langchain_tool_registry,
+        get_langchain_tools_for_agent
+    )
+    from langchain_core.documents import Document as LangChainDocument
+else:
+    # Runtime imports
+    try:
+        from .document_processor import DocumentProcessor
+        from .chromadb_manager import ChromaDBManager
+        from .retriever import RAGRetriever
+        from .rag_tool import RAGSearchTool
+        from .langchain_tools import (
+            CallReportDataTool,
+            BankLookupTool, 
+            LangChainToolRegistry,
+            create_langchain_tool_registry,
+            get_langchain_tools_for_agent
+        )
+    except ImportError:
+        # Handle missing dependencies gracefully
+        pass
 
 __all__ = [
     'DocumentChunk',

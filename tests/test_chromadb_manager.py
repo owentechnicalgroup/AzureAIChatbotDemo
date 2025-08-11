@@ -14,7 +14,7 @@ from datetime import datetime, timezone
 import sys
 sys.path.append(str(Path(__file__).parent.parent / "src"))
 
-from rag.vector_store import ChromaDBManager
+from rag.chromadb_manager import ChromaDBManager
 from rag import Document, DocumentChunk
 from config.settings import Settings
 
@@ -71,7 +71,7 @@ def mock_chunks():
 @pytest.fixture
 def chromadb_manager(mock_settings):
     """Create ChromaDBManager instance for testing."""
-    with patch('rag.vector_store.AzureOpenAIEmbeddings'):
+    with patch('rag.chromadb_manager.AzureOpenAIEmbeddings'):
         return ChromaDBManager(mock_settings)
 
 
@@ -80,7 +80,7 @@ class TestChromaDBManager:
     
     def test_initialization(self, mock_settings):
         """Test ChromaDBManager initialization."""
-        with patch('rag.vector_store.AzureOpenAIEmbeddings') as mock_embeddings:
+        with patch('rag.chromadb_manager.AzureOpenAIEmbeddings') as mock_embeddings:
             manager = ChromaDBManager(mock_settings)
             
             assert manager.settings == mock_settings

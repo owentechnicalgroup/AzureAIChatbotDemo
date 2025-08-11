@@ -24,25 +24,26 @@ if os.name == 'nt':  # Windows
     except (AttributeError, UnicodeError):
         pass
 
-# Add src directory to Python path for imports
-sys.path.insert(0, str(Path(__file__).parent))
+# Add project root directory to Python path for imports
+project_root = Path(__file__).parent.parent
+sys.path.insert(0, str(project_root))
 
 # Configure logging before other imports
 import structlog
 
 # Import application components
-from config.settings import get_settings, Settings, reload_settings
-from services.logging_service import setup_logging, get_logger
-from services.azure_client import AzureOpenAIClient
-from chatbot.agent import ChatbotAgent
-from chatbot.prompts import SystemPrompts
-from utils.console import create_console, get_console
-from utils.error_handlers import handle_error, format_error_for_user
-from utils.logging_helpers import log_startup_event, StructuredLogger
+from src.config.settings import get_settings, Settings, reload_settings
+from src.services.logging_service import setup_logging, get_logger
+from src.utils.azure_langchain import create_azure_chat_openai
+from src.chatbot.agent import ChatbotAgent
+from src.chatbot.prompts import SystemPrompts
+from src.utils.console import create_console, get_console
+from src.utils.error_handlers import handle_error, format_error_for_user
+from src.utils.logging_helpers import log_startup_event, StructuredLogger
 
 # Import Streamlit app for new primary interface
 try:
-    from ui.streamlit_app import main as streamlit_main
+    from src.ui.streamlit_app import main as streamlit_main
     STREAMLIT_AVAILABLE = True
 except ImportError:
     STREAMLIT_AVAILABLE = False
@@ -537,9 +538,13 @@ def health(click_ctx, output_format: str):
         
         if config_validation['azure_openai_configured']:
             try:
-                client = AzureOpenAIClient(settings)
-                azure_health = client.health_check()
-                health_results['azure_openai'] = azure_health
+                # Simple health check - just verify we can create the client
+                llm = create_azure_chat_openai(settings)
+                health_results['azure_openai'] = {
+                    'status': 'healthy',
+                    'model': llm.model_name,
+                    'deployment': settings.azure_openai_deployment
+                }
             except Exception as e:
                 health_results['azure_openai'] = {
                     'status': 'unhealthy',

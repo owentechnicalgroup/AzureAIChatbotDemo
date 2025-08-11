@@ -16,7 +16,7 @@ from typing import Optional, Dict, Any, Union
 from functools import wraps
 
 # Import dual observability routing system
-from observability.telemetry_service import route_log_by_type, get_application_logger, get_chat_observer
+from src.observability.telemetry_service import route_log_by_type, get_application_logger, get_chat_observer
 
 
 class StructuredLogger:

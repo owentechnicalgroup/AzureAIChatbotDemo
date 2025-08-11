@@ -15,9 +15,9 @@ import structlog
 from pypdf import PdfReader
 from docx import Document as DocxDocument
 from langchain.text_splitter import RecursiveCharacterTextSplitter
+from langchain_core.documents import Document as LangChainDocument
 
 from config.settings import Settings
-from .import DocumentChunk, Document
 
 logger = structlog.get_logger(__name__)
 
@@ -226,8 +226,11 @@ class DocumentProcessor:
                         total_pages=total_pages,
                         suggestion="Consider using OCR tools to extract text from image-based PDFs"
                     )
-                    # Don't raise an error immediately - let the caller handle this
-                    return ""
+                    raise ValueError(
+                        "No text content extracted from PDF. This might be an image-based/scanned PDF "
+                        "that requires OCR (Optical Character Recognition) to extract text. "
+                        "Try converting the PDF to a text-based format first."
+                    )
                 else:
                     raise ValueError("PDF has no pages")
             
@@ -235,7 +238,11 @@ class DocumentProcessor:
             
         except Exception as e:
             self.logger.error("PDF text extraction failed", error=str(e))
-            raise
+            # Re-raise ValueError with PDF-specific context, wrap other exceptions
+            if isinstance(e, ValueError):
+                raise
+            else:
+                raise ValueError(f"Failed to process PDF file: {str(e)}") from e
     
     async def _extract_docx_text(self, buffer: io.BytesIO) -> str:
         """Extract text from DOCX using python-docx."""
@@ -256,11 +263,28 @@ class DocumentProcessor:
                 total_text_length=len(text)
             )
             
+            # Handle DOCX-specific error case
+            if not text.strip():
+                total_paragraphs = len(doc.paragraphs)
+                self.logger.warning(
+                    "DOCX contains no extractable text",
+                    total_paragraphs=total_paragraphs,
+                    suggestion="Document might be empty or contain only images/graphics"
+                )
+                raise ValueError(
+                    "No text content extracted from DOCX file. The document might be empty "
+                    "or contain only images/graphics."
+                )
+            
             return text
             
         except Exception as e:
             self.logger.error("DOCX text extraction failed", error=str(e))
-            raise
+            # Re-raise ValueError with DOCX-specific context, wrap other exceptions
+            if isinstance(e, ValueError):
+                raise
+            else:
+                raise ValueError(f"Failed to process DOCX file: {str(e)}") from e
     
     async def _extract_txt_text(self, file_content: bytes) -> str:
         """Extract text from TXT file."""
@@ -276,6 +300,15 @@ class DocumentProcessor:
                         encoding_used=encoding,
                         text_length=len(text)
                     )
+                    
+                    # Handle TXT-specific error case
+                    if not text.strip():
+                        self.logger.warning(
+                            "TXT file is empty or contains only whitespace",
+                            file_size_bytes=len(file_content)
+                        )
+                        raise ValueError("TXT file is empty or contains no readable text content")
+                    
                     return text
                 except UnicodeDecodeError:
                     continue
@@ -286,22 +319,33 @@ class DocumentProcessor:
                 "TXT extraction used fallback encoding",
                 text_length=len(text)
             )
+            
+            # Handle TXT-specific error case for fallback
+            if not text.strip():
+                raise ValueError("TXT file contains no readable text content (encoding issues detected)")
+            
             return text
             
         except Exception as e:
             self.logger.error("TXT text extraction failed", error=str(e))
-            raise
+            # Re-raise ValueError with TXT-specific context, wrap other exceptions
+            if isinstance(e, ValueError):
+                raise
+            else:
+                raise ValueError(f"Failed to process TXT file: {str(e)}") from e
     
-    async def chunk_document(self, text: str, source: str) -> List[DocumentChunk]:
+    async def chunk_document(self, text: str, source: str, document_id: str = None, file_metadata: Optional[Dict[str, Any]] = None) -> List[LangChainDocument]:
         """
-        Split document text into chunks.
+        Split document text into LangChain Document chunks with complete metadata.
         
         Args:
             text: Document text to chunk
             source: Source document identifier
+            document_id: Optional document ID for metadata
+            file_metadata: Complete file metadata to include in each chunk
             
         Returns:
-            List of DocumentChunk objects
+            List of LangChain Document objects with full metadata
         """
         try:
             if not text.strip():
@@ -311,31 +355,41 @@ class DocumentProcessor:
             # Split text using the configured text splitter
             chunks = self.text_splitter.split_text(text)
             
-            # Create DocumentChunk objects
-            document_chunks = []
+            # Create LangChain Document objects with complete metadata
+            langchain_documents = []
             for i, chunk_content in enumerate(chunks):
                 if chunk_content.strip():  # Only create chunks with content
-                    chunk = DocumentChunk(
-                        id=f"{source}_{i}",
-                        content=chunk_content,
-                        source=source,
-                        chunk_index=i,
-                        metadata={
-                            "chunk_length": len(chunk_content),
-                            "created_at": datetime.now(timezone.utc).isoformat()
-                        }
+                    metadata = {
+                        "chunk_id": f"{source}_{i}",
+                        "source": source,
+                        "chunk_index": i,
+                        "chunk_length": len(chunk_content),
+                        "created_at": datetime.now(timezone.utc).isoformat()
+                    }
+                    
+                    # Add document ID if provided
+                    if document_id:
+                        metadata["document_id"] = document_id
+                    
+                    # Add complete file metadata if provided
+                    if file_metadata:
+                        metadata.update(file_metadata)
+                    
+                    document = LangChainDocument(
+                        page_content=chunk_content,
+                        metadata=metadata
                     )
-                    document_chunks.append(chunk)
+                    langchain_documents.append(document)
             
             self.logger.info(
                 "Document chunking completed",
                 source=source,
                 original_length=len(text),
-                total_chunks=len(document_chunks),
-                avg_chunk_size=sum(len(c.content) for c in document_chunks) / len(document_chunks) if document_chunks else 0
+                total_chunks=len(langchain_documents),
+                avg_chunk_size=sum(len(doc.page_content) for doc in langchain_documents) / len(langchain_documents) if langchain_documents else 0
             )
             
-            return document_chunks
+            return langchain_documents
             
         except Exception as e:
             self.logger.error(
@@ -351,9 +405,10 @@ class DocumentProcessor:
         file_path: Union[str, Path], 
         file_content: Optional[bytes] = None,
         source_name: Optional[str] = None
-    ) -> tuple[Document, List[DocumentChunk]]:
+    ) -> List[LangChainDocument]:
         """
-        Process a file completely: validate, extract text, and create chunks.
+        Process a file completely: validate, extract text, and create LangChain Document chunks.
+        All file metadata is embedded in each chunk's metadata.
         
         Args:
             file_path: Path to the file
@@ -361,7 +416,7 @@ class DocumentProcessor:
             source_name: Custom source name (optional, uses filename if not provided)
             
         Returns:
-            Tuple of (Document metadata, List of DocumentChunk objects)
+            List of LangChain Document objects with complete metadata
         """
         file_path = Path(file_path)
         processing_start = datetime.now(timezone.utc)
@@ -370,55 +425,44 @@ class DocumentProcessor:
         document_id = str(uuid.uuid4())
         source_name = source_name or file_path.name
         
-        document = Document(
-            id=document_id,
-            filename=file_path.name,
-            file_type=file_path.suffix.lower(),
-            size_bytes=len(file_content) if file_content else file_path.stat().st_size,
-            upload_timestamp=processing_start,
-            processing_status="processing"
-        )
+        # Prepare file metadata to embed in each chunk
+        file_metadata = {
+            "document_id": document_id,
+            "filename": file_path.name,
+            "file_type": file_path.suffix.lower(),
+            "file_size": len(file_content) if file_content else file_path.stat().st_size,
+            "upload_timestamp": processing_start.isoformat(),
+            "processing_status": "processing"
+        }
         
         try:
             # Validate file (allow memory-only processing if file_content is provided)
-            self.validate_file(file_path, document.size_bytes, allow_memory_only=(file_content is not None))
+            self.validate_file(file_path, file_metadata["file_size"], allow_memory_only=(file_content is not None))
             
             self.logger.info(
                 "Starting file processing",
                 document_id=document_id,
                 filename=file_path.name,
-                file_size_mb=document.size_bytes / (1024*1024)
+                file_size_mb=file_metadata["file_size"] / (1024*1024)
             )
             
-            # Extract text
+            # Extract text - file-type specific errors are handled in respective methods
             text = await self.extract_text(file_path, file_content)
             
-            if not text.strip():
-                # Provide more specific error messages based on file type
-                file_extension = file_path.suffix.lower()
-                if file_extension == '.pdf':
-                    raise ValueError(
-                        "No text content extracted from PDF. This might be an image-based/scanned PDF "
-                        "that requires OCR (Optical Character Recognition) to extract text. "
-                        "Try converting the PDF to a text-based format first."
-                    )
-                elif file_extension == '.docx':
-                    raise ValueError(
-                        "No text content extracted from DOCX file. The document might be empty "
-                        "or contain only images/graphics."
-                    )
-                else:
-                    raise ValueError(f"No text content extracted from {file_extension} file")
+            # Update processing status
+            file_metadata["processing_status"] = "completed"
             
-            # Create chunks
-            chunks = await self.chunk_document(text, source_name)
+            # Create LangChain Document chunks with complete metadata
+            chunks = await self.chunk_document(text, source_name, document_id, file_metadata)
             
             if not chunks:
+                file_metadata["processing_status"] = "failed"
+                file_metadata["error_message"] = "No valid chunks created from document"
                 raise ValueError("No valid chunks created from document")
             
-            # Update document status
-            document.processing_status = "completed"
-            document.chunk_count = len(chunks)
+            # Add chunk count to metadata
+            for chunk in chunks:
+                chunk.metadata["chunk_count"] = len(chunks)
             
             processing_time = (datetime.now(timezone.utc) - processing_start).total_seconds()
             
@@ -430,12 +474,12 @@ class DocumentProcessor:
                 processing_time_seconds=processing_time
             )
             
-            return document, chunks
+            return chunks
             
         except Exception as e:
-            # Update document with error status
-            document.processing_status = "failed"
-            document.error_message = str(e)
+            # Update status in metadata and add error info
+            file_metadata["processing_status"] = "failed"
+            file_metadata["error_message"] = str(e)
             
             self.logger.error(
                 "File processing failed",
@@ -450,7 +494,7 @@ class DocumentProcessor:
     async def process_multiple_files(
         self, 
         file_data: List[tuple[Union[str, Path], Optional[bytes]]]
-    ) -> tuple[List[Document], List[DocumentChunk]]:
+    ) -> List[LangChainDocument]:
         """
         Process multiple files concurrently.
         
@@ -458,7 +502,7 @@ class DocumentProcessor:
             file_data: List of (file_path, file_content) tuples
             
         Returns:
-            Tuple of (List of Documents, List of all DocumentChunks)
+            List of all LangChain Document chunks from all files
         """
         self.logger.info(
             "Starting batch file processing",
@@ -473,31 +517,26 @@ class DocumentProcessor:
         
         results = await asyncio.gather(*tasks, return_exceptions=True)
         
-        documents = []
         all_chunks = []
-        successful = 0
-        failed = 0
+        successful_count = 0
+        failed_count = 0
         
         for i, result in enumerate(results):
             if isinstance(result, Exception):
-                failed += 1
+                failed_count += 1
                 self.logger.error(
-                    "Batch processing item failed",
-                    item_index=i,
+                    "Failed to process file in batch",
+                    filename=str(file_data[i][0]),
                     error=str(result)
                 )
             else:
-                document, chunks = result
-                documents.append(document)
-                all_chunks.extend(chunks)
-                successful += 1
+                successful_count += 1
+                all_chunks.extend(result)
         
         self.logger.info(
             "Batch file processing completed",
-            total_files=len(file_data),
-            successful=successful,
-            failed=failed,
+            successful_count=successful_count,
+            failed_count=failed_count,
             total_chunks=len(all_chunks)
         )
         
-        return documents, all_chunks

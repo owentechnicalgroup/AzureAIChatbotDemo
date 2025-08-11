@@ -23,7 +23,7 @@ from rich.rule import Rule
 from rich import box
 import structlog
 
-from utils.error_handlers import ChatbotBaseError
+from src.utils.error_handlers import ChatbotBaseError
 
 logger = structlog.get_logger(__name__)
 

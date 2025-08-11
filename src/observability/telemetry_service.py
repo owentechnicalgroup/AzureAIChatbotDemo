@@ -19,7 +19,7 @@ from enum import Enum
 import structlog
 from structlog.typing import FilteringBoundLogger
 
-from config.settings import Settings
+from src.config.settings import Settings
 
 # Global state for telemetry services
 _application_logger: Optional['ApplicationLogger'] = None

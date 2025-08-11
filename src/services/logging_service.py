@@ -17,11 +17,11 @@ import structlog
 from structlog.typing import FilteringBoundLogger
 import uuid
 
-from config.settings import Settings
+from src.config.settings import Settings
 
 # Import dual observability system
 try:
-    from observability.telemetry_service import (
+    from src.observability.telemetry_service import (
         initialize_dual_observability, 
         route_log_by_type, 
         get_application_logger, 
@@ -115,51 +115,51 @@ class EnhancedApplicationInsightsFormatter(logging.Formatter):
         """Extract searchable metadata for customDimensions (excluding standard Properties fields)."""
         dimensions = {}
         
-        # Add conversation context if available
-        if hasattr(record, 'conversation_id') and record.conversation_id:
+        # Add conversation context if available (only if not None)
+        if hasattr(record, 'conversation_id') and record.conversation_id is not None:
             dimensions['conversation_id'] = str(record.conversation_id)
-        if hasattr(record, 'user_id') and record.user_id:
+        if hasattr(record, 'user_id') and record.user_id is not None:
             dimensions['user_id'] = str(record.user_id)
-        if hasattr(record, 'session_id') and record.session_id:
+        if hasattr(record, 'session_id') and record.session_id is not None:
             dimensions['session_id'] = str(record.session_id)
             
-        # Add operation context
-        if hasattr(record, 'operation_type') and record.operation_type:
+        # Add operation context (only if not None)
+        if hasattr(record, 'operation_type') and record.operation_type is not None:
             dimensions['operation_type'] = str(record.operation_type)
-        if hasattr(record, 'component') and record.component:
+        if hasattr(record, 'component') and record.component is not None:
             dimensions['component'] = str(record.component)
-        if hasattr(record, 'event_type') and record.event_type:
+        if hasattr(record, 'event_type') and record.event_type is not None:
             dimensions['event_type'] = str(record.event_type)
-        if hasattr(record, 'event_category') and record.event_category:
+        if hasattr(record, 'event_category') and record.event_category is not None:
             dimensions['event_category'] = str(record.event_category)
-        if hasattr(record, 'operation') and record.operation:
+        if hasattr(record, 'operation') and record.operation is not None:
             dimensions['operation'] = str(record.operation)
-        if hasattr(record, 'custom_field') and record.custom_field:
+        if hasattr(record, 'custom_field') and record.custom_field is not None:
             dimensions['custom_field'] = str(record.custom_field)
             
-        # Add authentication context
-        if hasattr(record, 'credential_type') and record.credential_type:
+        # Add authentication context (only if not None)
+        if hasattr(record, 'credential_type') and record.credential_type is not None:
             dimensions['credential_type'] = str(record.credential_type)
             
-        # Add success/failure status
+        # Add success/failure status (only if not None)
         if hasattr(record, 'success') and record.success is not None:
             dimensions['success'] = str(record.success).lower()
             
-        # Add error context
-        if hasattr(record, 'error_type') and record.error_type:
+        # Add error context (only if not None)
+        if hasattr(record, 'error_type') and record.error_type is not None:
             dimensions['error_type'] = str(record.error_type)
-        if hasattr(record, 'error_code') and record.error_code:
+        if hasattr(record, 'error_code') and record.error_code is not None:
             dimensions['error_code'] = str(record.error_code)
             
-        # Add Azure resource context
-        if hasattr(record, 'resource_type') and record.resource_type:
+        # Add Azure resource context (only if not None)
+        if hasattr(record, 'resource_type') and record.resource_type is not None:
             dimensions['resource_type'] = str(record.resource_type)
-        if hasattr(record, 'resource_name') and record.resource_name:
+        if hasattr(record, 'resource_name') and record.resource_name is not None:
             dimensions['resource_name'] = str(record.resource_name)
-        if hasattr(record, 'secret_name') and record.secret_name:
+        if hasattr(record, 'secret_name') and record.secret_name is not None:
             dimensions['secret_name'] = str(record.secret_name)
             
-        # Add numeric fields that should be searchable as strings
+        # Add numeric fields that should be searchable as strings (only if not None)
         if hasattr(record, 'turn_number') and record.turn_number is not None:
             dimensions['turn_number'] = str(record.turn_number)
         if hasattr(record, 'message_length') and record.message_length is not None:

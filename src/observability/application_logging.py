@@ -178,13 +178,20 @@ class ApplicationLogger:
         Returns:
             Dict with base fields for Azure Log Analytics
         """
-        return {
+        extra = {
             'log_type': log_type,
             'operation_id': log_data.get('operation_id', self.operation_id),
-            'success': log_data.get('success'),
-            'error_type': log_data.get('error_type'),
-            'error_code': log_data.get('error_code'),
         }
+        
+        # Only include fields with valid values (OpenTelemetry doesn't accept None)
+        if log_data.get('success') is not None:
+            extra['success'] = log_data.get('success')
+        if log_data.get('error_type') is not None:
+            extra['error_type'] = log_data.get('error_type')
+        if log_data.get('error_code') is not None:
+            extra['error_code'] = log_data.get('error_code')
+            
+        return extra
     
     # Preserve existing StructuredLogger method signatures for backward compatibility
     

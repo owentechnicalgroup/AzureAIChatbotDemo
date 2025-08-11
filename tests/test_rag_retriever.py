@@ -15,7 +15,7 @@ import sys
 sys.path.append(str(Path(__file__).parent.parent / "src"))
 
 from rag.retriever import RAGRetriever
-from rag.vector_store import ChromaDBManager
+from rag.chromadb_manager import ChromaDBManager
 from rag import RAGQuery, RAGResponse, DocumentChunk
 from config.settings import Settings
 from services.azure_client import AzureOpenAIClient
