@@ -1,37 +1,11 @@
 """
-Tools package for external API integrations and function calling.
+Tools package for LangChain-compatible tools.
 
-This package provides a framework for integrating external tools and APIs
-with the RAG chatbot system, enabling dynamic responses beyond document-based RAG.
+This package provides LangChain-compatible tools for the RAG chatbot system.
+All tools extend langchain.tools.BaseTool for seamless integration.
 """
 
-from .base import BaseTool, ToolRegistry, ToolExecutionResult
-from .ratings_tool import RestaurantRatingsTool
+# LangChain Call Report toolset is available via direct import:
+# from src.tools.call_report.langchain_toolset import LangChainCallReportToolset
 
-# Call Report tools import
-try:
-    from .call_report.langchain_tools import (
-        CallReportDataTool,
-        BankLookupTool,
-        CallReportToolset,
-        create_call_report_toolset
-    )
-    CALL_REPORT_AVAILABLE = True
-except ImportError:
-    CALL_REPORT_AVAILABLE = False
-
-__all__ = [
-    'BaseTool',
-    'ToolRegistry', 
-    'ToolExecutionResult',
-    'RestaurantRatingsTool'
-]
-
-# Add Call Report tools to exports if available
-if CALL_REPORT_AVAILABLE:
-    __all__.extend([
-        'CallReportDataTool',
-        'BankLookupTool', 
-        'CallReportToolset',
-        'create_call_report_toolset'
-    ])
+__all__ = []

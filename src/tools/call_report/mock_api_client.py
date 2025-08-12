@@ -12,7 +12,6 @@ from typing import Dict, Any, Optional
 import random
 
 import structlog
-from src.tools.base import BaseTool, ToolExecutionResult, ToolStatus
 from .constants import (
     ALL_FIELD_MAPPINGS, 
     VALID_FIELD_IDS, 
@@ -24,7 +23,7 @@ from .data_models import CallReportField, CallReportAPIResponse
 logger = structlog.get_logger(__name__).bind(log_type="SYSTEM")
 
 
-class CallReportMockAPI(BaseTool):
+class CallReportMockAPI:
     """
     Mock FFIEC Call Report API service implementation.
     
@@ -33,11 +32,8 @@ class CallReportMockAPI(BaseTool):
     """
     
     def __init__(self):
-        """Initialize the mock Call Report API tool."""
-        super().__init__(
-            name="call_report_data",
-            description="Retrieve FFIEC Call Report data for banks by schedule and field ID"
-        )
+        """Initialize the mock Call Report API service."""
+        self.logger = logger.bind(component="call_report_mock_api")
         
         # Load mock data
         self.mock_data = self._load_mock_data()
@@ -273,7 +269,7 @@ class CallReportMockAPI(BaseTool):
         rssd_id: str,
         schedule: str, 
         field_id: str
-    ) -> ToolExecutionResult:
+    ) -> Dict[str, Any]:
         """
         Execute Call Report data retrieval.
         
@@ -283,7 +279,7 @@ class CallReportMockAPI(BaseTool):
             field_id: Field identifier (e.g., "RCON2170")
             
         Returns:
-            ToolExecutionResult with field data or error
+            Dictionary with field data or raises exception on error
         """
         start_time = datetime.now(timezone.utc)
         
@@ -314,12 +310,7 @@ class CallReportMockAPI(BaseTool):
                 data_available=field_data.get("data_availability") == "available"
             )
             
-            return ToolExecutionResult(
-                status=ToolStatus.SUCCESS,
-                data=field_data,
-                execution_time=execution_time,
-                tool_name=self.name
-            )
+            return field_data
             
         except ValueError as e:
             execution_time = (datetime.now(timezone.utc) - start_time).total_seconds()
@@ -332,12 +323,7 @@ class CallReportMockAPI(BaseTool):
                 execution_time=execution_time
             )
             
-            return ToolExecutionResult(
-                status=ToolStatus.ERROR,
-                error=str(e),
-                execution_time=execution_time,
-                tool_name=self.name
-            )
+            raise e
             
         except Exception as e:
             execution_time = (datetime.now(timezone.utc) - start_time).total_seconds()
@@ -350,46 +336,8 @@ class CallReportMockAPI(BaseTool):
                 execution_time=execution_time
             )
             
-            return ToolExecutionResult(
-                status=ToolStatus.ERROR,
-                error=f"Failed to retrieve Call Report data: {str(e)}",
-                execution_time=execution_time,
-                tool_name=self.name
-            )
+            raise RuntimeError(f"Failed to retrieve Call Report data: {str(e)}")
     
-    def get_schema(self) -> Dict[str, Any]:
-        """
-        Get OpenAI function schema for this tool.
-        
-        Returns:
-            Function schema dictionary for OpenAI function calling
-        """
-        return {
-            "type": "function",
-            "function": {
-                "name": self.name,
-                "description": self.description,
-                "parameters": {
-                    "type": "object",
-                    "properties": {
-                        "rssd_id": {
-                            "type": "string",
-                            "description": "Bank identifier (RSSD ID) - numeric string"
-                        },
-                        "schedule": {
-                            "type": "string", 
-                            "description": "FFIEC schedule identifier (e.g., RC for Balance Sheet, RI for Income Statement)",
-                            "enum": list(VALID_SCHEDULES)
-                        },
-                        "field_id": {
-                            "type": "string",
-                            "description": "FFIEC field identifier (e.g., RCON2170 for Total Assets, RIAD4340 for Net Income)"
-                        }
-                    },
-                    "required": ["rssd_id", "schedule", "field_id"]
-                }
-            }
-        }
     
     def get_available_banks(self) -> Dict[str, Dict[str, str]]:
         """
@@ -410,4 +358,4 @@ class CallReportMockAPI(BaseTool):
     
     def is_available(self) -> bool:
         """Check if the mock API is available."""
-        return self._enabled and bool(self.mock_data)
+        return bool(self.mock_data)

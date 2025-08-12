@@ -123,15 +123,13 @@ Example usage: Get total assets for Bank of America (RSSD ID: 1073757)
                 return "Error: All parameters (rssd_id, schedule, field_id) are required"
             
             # Execute the API call
-            result = await self.api_client.execute(
+            data = await self.api_client.execute(
                 rssd_id=rssd_id,
                 schedule=schedule,
                 field_id=field_id
             )
             
-            if result.success:
-                data = result.data
-                return f"""Call Report Data Retrieved:
+            return f"""Call Report Data Retrieved:
 Bank RSSD ID: {rssd_id}
 Schedule: {schedule}
 Field: {field_id}
@@ -140,8 +138,6 @@ Date: {data.get('date', 'Not available')}
 Units: {data.get('units', 'Not specified')}
 
 Source: FFIEC Call Report data"""
-            else:
-                return f"Error retrieving Call Report data: {result.error}"
                 
         except Exception as e:
             logger.error("Call Report data query failed", error=str(e))
