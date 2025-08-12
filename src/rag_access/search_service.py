@@ -14,7 +14,7 @@ from openai import AsyncAzureOpenAI
 from src.config.settings import Settings
 from src.document_management.database_manager import DatabaseManager
 from .rag_models import RAGQuery, RAGResponse, SearchResult, SearchContext
-from .prompts.rag_prompts import RAGPrompts
+from .rag_prompts import RAGPrompts
 
 
 logger = structlog.get_logger(__name__)

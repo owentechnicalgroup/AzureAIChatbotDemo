@@ -13,6 +13,7 @@ Used by: ChatbotAgent, LangChain workflows, AI agents, multi-step reasoning
 from .search_service import SearchService
 from .rag_models import RAGQuery, RAGResponse, SearchResult, SearchContext
 from .rag_tool import RAGSearchTool
+from .rag_prompts import RAGPrompts
 
 __all__ = [
     'SearchService',
@@ -20,5 +21,6 @@ __all__ = [
     'RAGResponse', 
     'SearchResult',
     'SearchContext',
-    'RAGSearchTool'
+    'RAGSearchTool',
+    'RAGPrompts'
 ]
