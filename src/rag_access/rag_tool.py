@@ -27,17 +27,17 @@ class RAGSearchInput(BaseModel):
 
 class RAGSearchTool(BaseTool):
     """
-    LangChain tool for searching and querying RAG documents.
+    LangChain tool for searching RAG documents and providing formatted context.
     
-    This tool provides AI agents access to document search and
-    AI-generated responses based on uploaded documents.
+    This tool provides AI agents access to document search results and formatted 
+    document context. The agent's system prompt handles AI response generation.
     """
     
     name: str = "rag_search"
     description: str = (
-        "Search through uploaded documents and generate AI responses based on the content. "
+        "Search through uploaded documents and retrieve formatted document context. "
         "Use this tool when users ask questions that might be answered by uploaded documents. "
-        "The tool will search for relevant document chunks and generate contextual responses."
+        "The tool will search for relevant document chunks and provide formatted context for response generation."
     )
     args_schema: type[BaseModel] = RAGSearchInput
     
@@ -55,15 +55,15 @@ class RAGSearchTool(BaseTool):
         **kwargs: Any
     ) -> str:
         """
-        Execute RAG search synchronously.
+        Execute RAG document search synchronously.
         
         Args:
             query: Search query
             max_chunks: Maximum chunks to retrieve
-            use_general_knowledge: Whether to use general knowledge fallback
+            use_general_knowledge: Whether to use general knowledge (passed to agent)
             
         Returns:
-            AI-generated response based on document context
+            Formatted document context for agent to use in response generation
         """
         # This will be called by LangChain in sync context
         import asyncio
@@ -97,15 +97,15 @@ class RAGSearchTool(BaseTool):
         **kwargs: Any
     ) -> str:
         """
-        Execute RAG search asynchronously.
+        Execute RAG document search asynchronously.
         
         Args:
             query: Search query
             max_chunks: Maximum chunks to retrieve
-            use_general_knowledge: Whether to use general knowledge fallback
+            use_general_knowledge: Whether to use general knowledge (passed to agent)
             
         Returns:
-            AI-generated response based on document context
+            Formatted document context for agent to use in response generation
         """
         try:
             # Validate input
@@ -126,11 +126,10 @@ class RAGSearchTool(BaseTool):
             # Create search context
             context = SearchContext()
             
-            # Execute search and generation
+            # Execute document search and context formatting
             response = await self._search_service.search_and_generate(rag_query, context)
             
-            # Return the AI-generated response directly
-            # The AI is instructed via prompts to include sources when appropriate
+            # Return the formatted document context for the agent to use
             return response.content
                 
         except Exception as e:
@@ -169,9 +168,9 @@ class RAGSearchTool(BaseTool):
                 ],
                 "capabilities": [
                     "Document search and retrieval",
-                    "AI response generation with context",
+                    "Document context formatting",
                     "Source citation and relevance scoring",
-                    "General knowledge fallback (optional)"
+                    "Integration with agent for response generation"
                 ]
             }
         except Exception as e:
