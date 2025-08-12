@@ -252,25 +252,6 @@ class FlexibleRAGStreamlitApp:
         for message in st.session_state.messages:
             with st.chat_message(message["role"]):
                 st.markdown(message["content"])
-                
-                # Show processing mode and sources
-                if "processing_mode" in message and message["role"] == "assistant":
-                    mode = message["processing_mode"]
-                    
-                    # Show mode indicator
-                    if mode == "multi-step":
-                        if message.get("used_documents", False):
-                            st.success("📚 Used documents")
-                        else:
-                            st.info("🧠 Used general knowledge")
-                    
-                    # Show sources if available
-                    if st.session_state.show_sources and "sources" in message:
-                        sources = message["sources"]
-                        if sources:
-                            with st.expander(f"📚 Sources ({len(sources)})"):
-                                for i, source in enumerate(sources, 1):
-                                    st.markdown(f"{i}. {source}")
         
         # Chat input
         if prompt := st.chat_input("Ask about your documents or general topics..."):
@@ -288,43 +269,19 @@ class FlexibleRAGStreamlitApp:
         with st.chat_message("assistant"):
             with st.spinner("Thinking..." if st.session_state.use_general_knowledge else "Searching documents only..."):
                 try:
-                    # Let agent handle everything - no more direct RAG tool calls
-                    response_data = st.session_state.chatbot_agent.process_message(
+                    # Let agent handle everything - now returns simple string
+                    response_content = st.session_state.chatbot_agent.process_message(
                         user_message=prompt,
                         conversation_id=st.session_state.conversation_id
                     )
                     
-                    # Extract response content and metadata
-                    response_content = response_data.get('content', 'I apologize, but I couldn\'t generate a response.')
-                    processing_mode = response_data.get('processing_mode', 'unknown')
-                    used_documents = response_data.get('used_documents', False)
-                    sources = response_data.get('sources', [])
-                    
                     # Display response
                     st.markdown(response_content)
                     
-                    # Show processing mode info based on agent response
-                    if processing_mode == "agent_rag_documents":
-                        st.success("📚 Agent found relevant documents and used them")
-                    elif processing_mode == "agent_rag_general_knowledge":
-                        st.info("🧠 Agent used general knowledge (no relevant documents found)")
-                    elif processing_mode == "agent_rag_no_context":
-                        st.warning("🔒 Agent found no documents and general knowledge is disabled")
-                    elif processing_mode == "multi-step":
-                        if used_documents:
-                            st.success("📚 Used documents")
-                        else:
-                            st.info("🧠 Used general knowledge")
-                    else:
-                        st.info(f"ℹ️ Processing mode: {processing_mode}")
-                    
-                    # Store message with metadata
+                    # Store message simply
                     st.session_state.messages.append({
                         "role": "assistant", 
-                        "content": response_content,
-                        "processing_mode": processing_mode,
-                        "used_documents": used_documents,
-                        "sources": sources
+                        "content": response_content
                     })
                     
                 except Exception as e:
@@ -332,8 +289,7 @@ class FlexibleRAGStreamlitApp:
                     st.error(error_msg)
                     st.session_state.messages.append({
                         "role": "assistant", 
-                        "content": error_msg,
-                        "processing_mode": "error"
+                        "content": error_msg
                     })
 
     def _test_document_query(self):
@@ -349,10 +305,7 @@ class FlexibleRAGStreamlitApp:
             )
             
             with st.expander("📊 Test Result", expanded=True):
-                st.write(f"**Mode**: {response['processing_mode']}")
-                st.write(f"**Used Documents**: {response['used_documents']}")
-                st.write(f"**Sources**: {len(response.get('sources', []))}")
-                st.text_area("Response", response['content'], height=150)
+                st.text_area("Response", response, height=150)
                 
         except Exception as e:
             st.error(f"Test failed: {str(e)}")
@@ -371,62 +324,8 @@ class FlexibleRAGStreamlitApp:
             )
             
             with st.expander("📊 Test Result", expanded=True):
-                st.write(f"**Mode**: {response['processing_mode']}")
-                st.write(f"**Used Documents**: {response['used_documents']}")
-                st.write(f"**Sources**: {len(response.get('sources', []))}")
                 st.write(f"**Agent Config**: {st.session_state.use_general_knowledge}")
-                
-                if response['processing_mode'] == "agent_rag_documents":
-                    st.success("✅ Agent found documents and used them")
-                elif response['processing_mode'] == "agent_rag_general_knowledge":
-                    st.info("ℹ️ Agent used general knowledge (no documents found)")
-                elif response['processing_mode'] == "agent_rag_no_context":
-                    st.warning("⚠️ Agent found no documents and refused general knowledge")
-                
-                st.text_area("Response", response['content'], height=150)
-                
-        except Exception as e:
-            st.error(f"Test failed: {str(e)}")
-        
-        try:
-            response = self._generate_flexible_response(test_prompt)
-            
-            with st.expander("📊 Test Result", expanded=True):
-                st.write(f"**Mode**: {response['processing_mode']}")
-                st.write(f"**Used Documents**: {response['used_documents']}")
-                st.write(f"**Sources**: {len(response.get('sources', []))}")
-                st.text_area("Response", response['content'], height=150)
-                
-        except Exception as e:
-            st.error(f"Test failed: {str(e)}")
-    
-    def _test_general_knowledge_query(self):
-        """Test with a general knowledge query."""
-        test_prompt = "What is the capital of France?"  # This should NOT be in banking documents
-        st.info(f"Testing with: '{test_prompt}' (should not find documents)")
-        st.info(f"Current toggle state: {'Hybrid Mode' if st.session_state.use_general_knowledge else 'Document-Only Mode'}")
-        
-        try:
-            response = self._generate_flexible_response(test_prompt)
-            
-            with st.expander("📊 Test Result", expanded=True):
-                st.write(f"**Mode**: {response['processing_mode']}")
-                st.write(f"**Used Documents**: {response['used_documents']}")
-                st.write(f"**Sources**: {len(response.get('sources', []))}")
-                st.write(f"**Toggle State**: {st.session_state.use_general_knowledge}")
-                
-                if st.session_state.use_general_knowledge:
-                    if response['used_documents']:
-                        st.success("✅ Found documents and used them")
-                    else:
-                        st.info("ℹ️ No documents found, used general knowledge")
-                else:
-                    if response['used_documents']:
-                        st.success("✅ Found documents and used them")
-                    else:
-                        st.warning("⚠️ No documents found, refused general knowledge")
-                
-                st.text_area("Response", response['content'], height=150)
+                st.text_area("Response", response, height=150)
                 
         except Exception as e:
             st.error(f"Test failed: {str(e)}")
@@ -498,7 +397,8 @@ class FlexibleRAGStreamlitApp:
                 )
                 
                 if result.success:
-                    st.success(f"✅ Processed {uploaded_file.name} - {result.chunks_created} chunks")
+                    chunk_count = result.document_info.chunk_count if result.document_info else 0
+                    st.success(f"✅ Processed {uploaded_file.name} - {chunk_count} chunks")
                 else:
                     st.warning(f"⚠️ Failed to process {uploaded_file.name}: {result.error}")
             
@@ -564,8 +464,14 @@ class FlexibleRAGStreamlitApp:
             if st.button("Test: Document Content", key="test_content"):
                 test_prompt = "What is the main topic of the uploaded documents?"
                 st.info(f"Testing: '{test_prompt}'")
-                response = self._generate_flexible_response(test_prompt)
-                st.text_area("Result", response['content'], height=100, key="content_result")
+                try:
+                    response = st.session_state.chatbot_agent.process_message(
+                        user_message=test_prompt,
+                        conversation_id=st.session_state.conversation_id
+                    )
+                    st.text_area("Result", response, height=100, key="content_result")
+                except Exception as e:
+                    st.error(f"Test failed: {str(e)}")
         
         with col2:
             st.write("**🧠 General Knowledge Questions**")
@@ -577,8 +483,14 @@ class FlexibleRAGStreamlitApp:
             if st.button("Test: General Topic", key="test_general"):
                 test_prompt = "What is artificial intelligence?"
                 st.info(f"Testing: '{test_prompt}'")
-                response = self._generate_flexible_response(test_prompt)
-                st.text_area("Result", response['content'], height=100, key="general_result")
+                try:
+                    response = st.session_state.chatbot_agent.process_message(
+                        user_message=test_prompt,
+                        conversation_id=st.session_state.conversation_id
+                    )
+                    st.text_area("Result", response, height=100, key="general_result")
+                except Exception as e:
+                    st.error(f"Test failed: {str(e)}")
         
         # Mode comparison
         st.subheader("🔄 Mode Comparison")
@@ -594,19 +506,34 @@ class FlexibleRAGStreamlitApp:
                 st.write("**Document-Only Mode**")
                 original_mode = st.session_state.use_general_knowledge
                 st.session_state.use_general_knowledge = False
-                strict_response = self._generate_flexible_response(comparison_query)
-                st.text_area("Document-Only Result", strict_response['content'], height=150, key="strict_compare")
-                st.caption(f"Used documents: {strict_response['used_documents']}")
+                # Update agent preference
+                st.session_state.chatbot_agent.update_general_knowledge_preference(False)
+                try:
+                    strict_response = st.session_state.chatbot_agent.process_message(
+                        user_message=comparison_query,
+                        conversation_id=st.session_state.conversation_id
+                    )
+                    st.text_area("Document-Only Result", strict_response, height=150, key="strict_compare")
+                except Exception as e:
+                    st.error(f"Test failed: {str(e)}")
             
             with col2:
                 st.write("**Hybrid Mode**")
                 st.session_state.use_general_knowledge = True
-                hybrid_response = self._generate_flexible_response(comparison_query)
-                st.text_area("Hybrid Result", hybrid_response['content'], height=150, key="hybrid_compare")
-                st.caption(f"Used documents: {hybrid_response['used_documents']}")
+                # Update agent preference  
+                st.session_state.chatbot_agent.update_general_knowledge_preference(True)
+                try:
+                    hybrid_response = st.session_state.chatbot_agent.process_message(
+                        user_message=comparison_query,
+                        conversation_id=st.session_state.conversation_id
+                    )
+                    st.text_area("Hybrid Result", hybrid_response, height=150, key="hybrid_compare")
+                except Exception as e:
+                    st.error(f"Test failed: {str(e)}")
             
             # Restore original mode
             st.session_state.use_general_knowledge = original_mode
+            st.session_state.chatbot_agent.update_general_knowledge_preference(original_mode)
     
     def _render_system_status(self):
         """Render system status information."""

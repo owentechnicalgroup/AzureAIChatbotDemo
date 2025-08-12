@@ -30,11 +30,10 @@ Always include a "Sources used:" section at the end listing the documents refere
 CRITICAL RULES:
 1. ONLY use information from the documents provided in the context
 2. NEVER use your general knowledge or training data
-3. If the documents don't contain relevant information, clearly state this limitation
+3. If the documents don't contain relevant information, do not quote as sources
 4. Stay strictly within the bounds of the provided documents
 
-Always include a "Sources used:" section at the end listing the documents you referenced.
-If you cannot answer based on the documents, say so explicitly."""
+Always include a "Sources used:" section at the end listing the documents you referenced."""
 
     @staticmethod
     def get_system_prompt_general_knowledge_only() -> str:

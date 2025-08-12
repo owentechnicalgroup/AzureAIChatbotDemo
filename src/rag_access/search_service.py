@@ -279,66 +279,7 @@ class SearchService:
         else:
             # No documents found
             return "general_knowledge" if use_general_knowledge else "no_context"
-    
-    async def search_refinement_suggestions(self, query: str) -> Dict[str, Any]:
-        """
-        Get search refinement suggestions for a query.
-        
-        Args:
-            query: Original search query
-            
-        Returns:
-            Refinement suggestions and metadata
-        """
-        try:
-            # Perform a quick search to count results
-            quick_search = RAGQuery(
-                query=query,
-                max_chunks=1,
-                score_threshold=0.1
-            )
-            
-            results = await self._search_documents(quick_search)
-            results_count = len(results)
-            
-            refinement_prompt = RAGPrompts.get_search_refinement_prompt(
-                query, 
-                results_count
-            )
-            
-            return {
-                "refinement_text": refinement_prompt,
-                "results_count": results_count,
-                "suggestions": self._generate_search_suggestions(query, results_count)
-            }
-            
-        except Exception as e:
-            self.logger.error("Search refinement failed", query=query, error=str(e))
-            return {
-                "refinement_text": "Unable to generate search suggestions at this time.",
-                "results_count": 0,
-                "suggestions": []
-            }
-    
-    def _generate_search_suggestions(self, query: str, results_count: int) -> List[str]:
-        """Generate contextual search suggestions."""
-        suggestions = []
-        
-        if results_count == 0:
-            suggestions.extend([
-                "Try using different keywords",
-                "Make your query more specific",
-                "Check if relevant documents are uploaded",
-                "Use broader terms if your query is very specific"
-            ])
-        elif results_count < 2:
-            suggestions.extend([
-                "Try related terms or synonyms",
-                "Make your query more general for more results",
-                "Consider uploading more relevant documents"
-            ])
-        
-        return suggestions
+   
     
     async def get_available_documents(self) -> List[Dict[str, Any]]:
         """
