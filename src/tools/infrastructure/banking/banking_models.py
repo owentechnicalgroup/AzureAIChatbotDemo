@@ -325,7 +325,7 @@ class CallReportAPIResponse(BaseModel):
         None,
         description="Response data if successful"
     )
-    error: Optional[str] = Field(
+    error_message: Optional[str] = Field(
         None,
         description="Error message if unsuccessful"
     )
@@ -339,7 +339,7 @@ class CallReportAPIResponse(BaseModel):
         extra="allow"  # Allow additional fields for flexibility
     )
     
-    @field_validator('error')
+    @field_validator('error_message')
     @classmethod
     def validate_error_with_success(cls, v: Optional[str], info) -> Optional[str]:
         """Ensure error message is present when success=False."""

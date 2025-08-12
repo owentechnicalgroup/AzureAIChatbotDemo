@@ -16,7 +16,7 @@ from langchain.callbacks.manager import (
     CallbackManagerForToolRun,
 )
 
-from .mock_api_client import CallReportMockAPI
+from ..infrastructure.banking.call_report_api import CallReportMockAPI
 
 logger = structlog.get_logger(__name__).bind(log_type="SYSTEM")
 
@@ -123,13 +123,16 @@ Example usage: Get total assets for Bank of America (RSSD ID: 1073757)
                 return "Error: All parameters (rssd_id, schedule, field_id) are required"
             
             # Execute the API call
-            data = await self.api_client.execute(
+            result = await self.api_client.execute(
                 rssd_id=rssd_id,
                 schedule=schedule,
                 field_id=field_id
             )
             
-            return f"""Call Report Data Retrieved:
+            # Handle API result
+            if result.success:
+                data = result.data
+                return f"""Call Report Data Retrieved:
 Bank RSSD ID: {rssd_id}
 Schedule: {schedule}
 Field: {field_id}
@@ -138,6 +141,8 @@ Date: {data.get('date', 'Not available')}
 Units: {data.get('units', 'Not specified')}
 
 Source: FFIEC Call Report data"""
+            else:
+                return f"Error: {result.error_message}"
                 
         except Exception as e:
             logger.error("Call Report data query failed", error=str(e))

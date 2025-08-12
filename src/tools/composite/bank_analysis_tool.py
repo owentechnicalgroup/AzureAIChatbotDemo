@@ -18,8 +18,8 @@ from langchain.callbacks.manager import (
     CallbackManagerForToolRun,
 )
 
-from .bank_lookup_langchain import BankLookupTool as LangChainBankLookupTool
-from .mock_api_client import CallReportMockAPI
+from ..atomic.bank_lookup_tool import BankLookupTool
+from ..infrastructure.banking.call_report_api import CallReportMockAPI
 
 logger = structlog.get_logger(__name__).bind(log_type="SYSTEM")
 
@@ -62,13 +62,13 @@ Example: Get basic info for JPMorgan Chase
         super().__init__(**kwargs)
         
         # Initialize component tools - use private attributes to avoid Pydantic conflicts
-        object.__setattr__(self, '_bank_lookup', LangChainBankLookupTool())
+        object.__setattr__(self, '_bank_lookup', BankLookupTool())
         object.__setattr__(self, '_api_client', CallReportMockAPI())
         
         logger.info("BankAnalysisTool initialized")
     
     @property
-    def bank_lookup(self) -> LangChainBankLookupTool:
+    def bank_lookup(self) -> BankLookupTool:
         """Get the bank lookup tool."""
         return getattr(self, '_bank_lookup')
     

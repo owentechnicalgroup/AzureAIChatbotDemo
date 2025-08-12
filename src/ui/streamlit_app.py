@@ -27,7 +27,7 @@ from src.chatbot.agent import ChatbotAgent
 
 # Import new separated RAG architecture components
 from src.document_management import DocumentManager
-from src.rag_access.rag_tool import RAGSearchTool
+from src.tools.atomic.rag_search_tool import RAGSearchTool
 from src.services.response_formatter import ResponseFormattingService
 
 # Configure structured logging
@@ -77,8 +77,8 @@ class FlexibleRAGStreamlitApp:
         if "banking_tools" not in st.session_state:
             banking_tools = []
             try:
-                from src.tools.call_report.langchain_toolset import LangChainCallReportToolset
-                toolset = LangChainCallReportToolset(self.settings)
+                from src.tools.infrastructure.toolsets.banking_toolset import BankingToolset
+                toolset = BankingToolset(self.settings)
                 if toolset.is_available():
                     banking_tools.extend(toolset.get_tools())
             except Exception as e:

@@ -110,6 +110,9 @@ ALL_FIELD_MAPPINGS = {
     **RCN_ASSET_QUALITY_FIELDS
 }
 
+# Rename this to avoid conflict with the constant above
+CALL_REPORT_FIELDS = ALL_FIELD_MAPPINGS
+
 # Field to Schedule Mapping
 FIELD_TO_SCHEDULE = {
     # RC Schedule fields

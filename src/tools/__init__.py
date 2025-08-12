@@ -1,11 +1,43 @@
 """
-Tools package for LangChain-compatible tools.
+Tools module - organized by atomic, composite, and infrastructure components.
 
-This package provides LangChain-compatible tools for the RAG chatbot system.
-All tools extend langchain.tools.BaseTool for seamless integration.
+This module provides a clean organization of LangChain tools:
+- atomic: Single-purpose, focused tools
+- composite: Multi-step workflow orchestration tools  
+- infrastructure: Supporting services, data models, and tool collections
 """
 
-# LangChain Call Report toolset is available via direct import:
-# from src.tools.call_report.langchain_toolset import LangChainCallReportToolset
+# Import organized tool collections
+from .atomic import BankLookupTool, CallReportDataTool, RAGSearchTool
+from .composite import BankAnalysisTool
+from .infrastructure.toolsets import BankingToolset
 
-__all__ = []
+# Tool management utilities
+from .categories import (
+    ToolCategory,
+    get_tool_category,
+    get_tool_metadata,
+    filter_tools_by_service_availability
+)
+from .dynamic_loader import DynamicToolLoader, ServiceAvailabilityChecker
+
+__all__ = [
+    # Atomic tools
+    "BankLookupTool",
+    "CallReportDataTool", 
+    "RAGSearchTool",
+    
+    # Composite tools
+    "BankAnalysisTool",
+    
+    # Infrastructure
+    "BankingToolset",
+    
+    # Tool management
+    "ToolCategory",
+    "get_tool_category",
+    "get_tool_metadata", 
+    "filter_tools_by_service_availability",
+    "DynamicToolLoader",
+    "ServiceAvailabilityChecker"
+]

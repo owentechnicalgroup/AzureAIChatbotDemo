@@ -1,7 +1,7 @@
 """
-LangChain-native Call Report toolset for dynamic loading.
+LangChain-native Banking toolset for dynamic loading.
 
-Provides a coordinated set of Call Report tools that extend langchain.tools.BaseTool
+Provides a coordinated set of banking tools that extend langchain.tools.BaseTool
 for seamless integration with the dynamic tool loading system.
 """
 
@@ -10,31 +10,31 @@ import structlog
 from langchain.tools import BaseTool
 
 from src.config.settings import Settings
-from .bank_lookup_langchain import BankLookupTool
-from .call_report_data_langchain import CallReportDataTool  
-from .bank_analysis_langchain import BankAnalysisTool
-from .mock_api_client import CallReportMockAPI
+from ...atomic.bank_lookup_tool import BankLookupTool
+from ...atomic.call_report_data_tool import CallReportDataTool  
+from ...composite.bank_analysis_tool import BankAnalysisTool
+from ..banking.call_report_api import CallReportMockAPI
 
 logger = structlog.get_logger(__name__).bind(log_type="SYSTEM")
 
 
-class LangChainCallReportToolset:
+class BankingToolset:
     """
-    LangChain-native Call Report toolset for dynamic loading.
+    LangChain-native Banking toolset for dynamic loading.
     
-    Manages a collection of Call Report tools that properly extend
+    Manages a collection of banking tools that properly extend
     langchain.tools.BaseTool for use with the enhanced tool loading system.
     """
     
     def __init__(self, settings: Settings):
         """
-        Initialize the LangChain Call Report toolset.
+        Initialize the LangChain Banking toolset.
         
         Args:
             settings: Application settings
         """
         self.settings = settings
-        self.logger = logger.bind(component="langchain_call_report_toolset")
+        self.logger = logger.bind(component="banking_toolset")
         
         # Initialize shared API client
         self.api_client = CallReportMockAPI()
@@ -44,13 +44,13 @@ class LangChainCallReportToolset:
         self._initialize_tools()
         
         self.logger.info(
-            "LangChain Call Report toolset initialized",
+            "LangChain Banking toolset initialized",
             tools_count=len(self._tools),
             tool_names=[tool.name for tool in self._tools]
         )
     
     def _initialize_tools(self) -> None:
-        """Initialize all LangChain Call Report tools."""
+        """Initialize all LangChain Banking tools."""
         try:
             # Create LangChain-native tools
             bank_lookup = BankLookupTool()
@@ -60,17 +60,17 @@ class LangChainCallReportToolset:
             self._tools = [bank_lookup, call_report_data, bank_analysis]
             
             self.logger.info(
-                "LangChain Call Report tools initialized",
+                "LangChain Banking tools initialized",
                 tool_count=len(self._tools)
             )
             
         except Exception as e:
-            self.logger.error("Failed to initialize LangChain Call Report tools", error=str(e))
+            self.logger.error("Failed to initialize LangChain Banking tools", error=str(e))
             self._tools = []
     
     def get_tools(self) -> List[BaseTool]:
         """
-        Get all LangChain Call Report tools.
+        Get all LangChain Banking tools.
         
         Returns:
             List of LangChain BaseTool instances
@@ -94,7 +94,7 @@ class LangChainCallReportToolset:
     
     def is_available(self) -> bool:
         """
-        Check if the Call Report toolset is available.
+        Check if the Banking toolset is available.
         
         Returns:
             True if tools are available and API is accessible

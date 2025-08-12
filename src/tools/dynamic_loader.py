@@ -164,21 +164,17 @@ class ServiceAvailabilityChecker:
         Follows the existing pattern in chromadb_manager.py.
         """
         try:
-            from src.rag.chromadb_manager import ChromaDBManager
+            from src.rag_access.search_service import SearchService
             
-            # Initialize ChromaDB manager
-            chromadb_manager = ChromaDBManager(self.settings)
+            # Initialize search service which handles ChromaDB
+            search_service = SearchService(self.settings)
             
-            # Test basic functionality - get document count
-            doc_count = await chromadb_manager.get_document_count()
-            
-            # ChromaDB is available if we can get count (even if 0)
-            is_available = doc_count >= 0
+            # Test basic functionality - check if available
+            is_available = search_service.is_available()
             
             self.logger.debug(
                 "ChromaDB availability check",
-                available=is_available,
-                document_count=doc_count
+                available=is_available
             )
             
             return is_available
@@ -197,7 +193,7 @@ class ServiceAvailabilityChecker:
         Follows the existing pattern in call_report tools.
         """
         try:
-            from src.tools.call_report.mock_api_client import CallReportMockAPI
+            from .infrastructure.banking.call_report_api import CallReportMockAPI
             
             # Initialize mock API client
             api_client = CallReportMockAPI()
@@ -381,13 +377,11 @@ class DynamicToolLoader:
         # Load RAG tool if ChromaDB is available
         if "chromadb" in self._available_services:
             try:
-                from src.rag.rag_tool import RAGSearchTool
-                from src.rag.retriever import RAGRetriever
+                from .atomic.rag_search_tool import RAGSearchTool
                 from .categories import add_category_metadata, ToolCategory
                 
-                # Initialize RAG components
-                rag_retriever = RAGRetriever(self.settings)
-                rag_tool = RAGSearchTool(rag_retriever)
+                # Initialize RAG tool
+                rag_tool = RAGSearchTool(self.settings)
                 
                 # Add category metadata
                 rag_tool = add_category_metadata(
@@ -411,15 +405,15 @@ class DynamicToolLoader:
         """Load banking category tools (Call Report, financial analysis)."""
         tools = []
         
-        # Load Call Report tools if API is available
+        # Load Banking tools if API is available
         if "call_report_api" in self._available_services:
             try:
-                from src.tools.call_report.langchain_toolset import LangChainCallReportToolset
+                from .infrastructure.toolsets.banking_toolset import BankingToolset
                 from .categories import add_category_metadata, ToolCategory
                 
-                # Initialize LangChain-native Call Report toolset
-                call_report_toolset = LangChainCallReportToolset(self.settings)
-                langchain_tools = call_report_toolset.get_tools()
+                # Initialize LangChain-native Banking toolset
+                banking_toolset = BankingToolset(self.settings)
+                langchain_tools = banking_toolset.get_tools()
                 
                 # Add category metadata to each LangChain tool
                 for tool in langchain_tools:
@@ -444,13 +438,13 @@ class DynamicToolLoader:
                     tools.append(tool)
                 
                 self.logger.info(
-                    "LangChain Call Report tools loaded successfully",
+                    "LangChain Banking tools loaded successfully",
                     tool_count=len(tools),
                     tool_names=[tool.name for tool in tools]
                 )
                 
             except Exception as e:
-                self.logger.error("Failed to load LangChain Call Report tools", error=str(e))
+                self.logger.error("Failed to load LangChain Banking tools", error=str(e))
         
         return tools
     

@@ -19,7 +19,7 @@ from langchain.callbacks.manager import (
     CallbackManagerForToolRun,
 )
 
-from .data_models import BankIdentification
+from ..infrastructure.banking.banking_models import BankIdentification
 
 logger = structlog.get_logger(__name__).bind(log_type="SYSTEM")
 

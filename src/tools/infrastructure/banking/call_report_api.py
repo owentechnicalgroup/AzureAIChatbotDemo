@@ -12,13 +12,13 @@ from typing import Dict, Any, Optional
 import random
 
 import structlog
-from .constants import (
+from .banking_constants import (
     ALL_FIELD_MAPPINGS, 
     VALID_FIELD_IDS, 
     VALID_SCHEDULES,
     get_field_info
 )
-from .data_models import CallReportField, CallReportAPIResponse
+from .banking_models import CallReportField, CallReportAPIResponse
 
 logger = structlog.get_logger(__name__).bind(log_type="SYSTEM")
 
@@ -269,7 +269,7 @@ class CallReportMockAPI:
         rssd_id: str,
         schedule: str, 
         field_id: str
-    ) -> Dict[str, Any]:
+    ) -> CallReportAPIResponse:
         """
         Execute Call Report data retrieval.
         
@@ -279,7 +279,7 @@ class CallReportMockAPI:
             field_id: Field identifier (e.g., "RCON2170")
             
         Returns:
-            Dictionary with field data or raises exception on error
+            CallReportAPIResponse with field data or error information
         """
         start_time = datetime.now(timezone.utc)
         
@@ -310,7 +310,11 @@ class CallReportMockAPI:
                 data_available=field_data.get("data_availability") == "available"
             )
             
-            return field_data
+            return CallReportAPIResponse(
+                success=True,
+                data=field_data,
+                timestamp=datetime.now(timezone.utc).isoformat()
+            )
             
         except ValueError as e:
             execution_time = (datetime.now(timezone.utc) - start_time).total_seconds()
@@ -323,7 +327,11 @@ class CallReportMockAPI:
                 execution_time=execution_time
             )
             
-            raise e
+            return CallReportAPIResponse(
+                success=False,
+                error_message=str(e),
+                timestamp=datetime.now(timezone.utc).isoformat()
+            )
             
         except Exception as e:
             execution_time = (datetime.now(timezone.utc) - start_time).total_seconds()
@@ -336,8 +344,11 @@ class CallReportMockAPI:
                 execution_time=execution_time
             )
             
-            raise RuntimeError(f"Failed to retrieve Call Report data: {str(e)}")
-    
+            return CallReportAPIResponse(
+                success=False,
+                error_message=f"Failed to retrieve Call Report data: {str(e)}",
+                timestamp=datetime.now(timezone.utc).isoformat()
+            )
     
     def get_available_banks(self) -> Dict[str, Dict[str, str]]:
         """
