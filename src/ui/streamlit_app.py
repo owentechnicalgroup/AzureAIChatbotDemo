@@ -28,6 +28,7 @@ from src.chatbot.agent import ChatbotAgent
 # Import new separated RAG architecture components
 from src.document_management import DocumentManager
 from src.rag_access.rag_tool import RAGSearchTool
+from src.services.response_formatter import ResponseFormattingService
 
 # Configure structured logging
 logger = structlog.get_logger(__name__)
@@ -67,6 +68,10 @@ class FlexibleRAGStreamlitApp:
         # RAG tool - using new separated architecture
         if "rag_tool" not in st.session_state:
             st.session_state.rag_tool = RAGSearchTool(self.settings)
+        
+        # Response formatter
+        if "response_formatter" not in st.session_state:
+            st.session_state.response_formatter = ResponseFormattingService()
         
         # Banking tools
         if "banking_tools" not in st.session_state:
@@ -269,16 +274,20 @@ class FlexibleRAGStreamlitApp:
         with st.chat_message("assistant"):
             with st.spinner("Thinking..." if st.session_state.use_general_knowledge else "Searching documents only..."):
                 try:
-                    # Let agent handle everything - now returns simple string
-                    response_content = st.session_state.chatbot_agent.process_message(
+                    # Get raw response from agent
+                    raw_response = st.session_state.chatbot_agent.process_message(
                         user_message=prompt,
                         conversation_id=st.session_state.conversation_id
                     )
                     
-                    # Display response
+                    # Apply formatting service to improve display
+                    formatted_response = st.session_state.response_formatter.format_response(raw_response)
+                    response_content = formatted_response.get('content', str(raw_response))
+                    
+                    # Display formatted response
                     st.markdown(response_content)
                     
-                    # Store message simply
+                    # Store formatted message
                     st.session_state.messages.append({
                         "role": "assistant", 
                         "content": response_content
@@ -299,13 +308,17 @@ class FlexibleRAGStreamlitApp:
         
         try:
             # Use agent for testing too
-            response = st.session_state.chatbot_agent.process_message(
+            raw_response = st.session_state.chatbot_agent.process_message(
                 user_message=test_prompt,
                 conversation_id=st.session_state.conversation_id
             )
             
+            # Apply formatting
+            formatted_response = st.session_state.response_formatter.format_response(raw_response)
+            response_content = formatted_response.get('content', str(raw_response))
+            
             with st.expander("📊 Test Result", expanded=True):
-                st.text_area("Response", response, height=150)
+                st.markdown(response_content)
                 
         except Exception as e:
             st.error(f"Test failed: {str(e)}")
@@ -318,14 +331,18 @@ class FlexibleRAGStreamlitApp:
         
         try:
             # Use agent for testing
-            response = st.session_state.chatbot_agent.process_message(
+            raw_response = st.session_state.chatbot_agent.process_message(
                 user_message=test_prompt,
                 conversation_id=st.session_state.conversation_id
             )
             
+            # Apply formatting
+            formatted_response = st.session_state.response_formatter.format_response(raw_response)
+            response_content = formatted_response.get('content', str(raw_response))
+            
             with st.expander("📊 Test Result", expanded=True):
                 st.write(f"**Agent Config**: {st.session_state.use_general_knowledge}")
-                st.text_area("Response", response, height=150)
+                st.markdown(response_content)
                 
         except Exception as e:
             st.error(f"Test failed: {str(e)}")
@@ -465,11 +482,14 @@ class FlexibleRAGStreamlitApp:
                 test_prompt = "What is the main topic of the uploaded documents?"
                 st.info(f"Testing: '{test_prompt}'")
                 try:
-                    response = st.session_state.chatbot_agent.process_message(
+                    raw_response = st.session_state.chatbot_agent.process_message(
                         user_message=test_prompt,
                         conversation_id=st.session_state.conversation_id
                     )
-                    st.text_area("Result", response, height=100, key="content_result")
+                    formatted_response = st.session_state.response_formatter.format_response(raw_response)
+                    response_content = formatted_response.get('content', str(raw_response))
+                    with st.container():
+                        st.markdown(response_content)
                 except Exception as e:
                     st.error(f"Test failed: {str(e)}")
         
@@ -484,11 +504,14 @@ class FlexibleRAGStreamlitApp:
                 test_prompt = "What is artificial intelligence?"
                 st.info(f"Testing: '{test_prompt}'")
                 try:
-                    response = st.session_state.chatbot_agent.process_message(
+                    raw_response = st.session_state.chatbot_agent.process_message(
                         user_message=test_prompt,
                         conversation_id=st.session_state.conversation_id
                     )
-                    st.text_area("Result", response, height=100, key="general_result")
+                    formatted_response = st.session_state.response_formatter.format_response(raw_response)
+                    response_content = formatted_response.get('content', str(raw_response))
+                    with st.container():
+                        st.markdown(response_content)
                 except Exception as e:
                     st.error(f"Test failed: {str(e)}")
         
@@ -509,11 +532,13 @@ class FlexibleRAGStreamlitApp:
                 # Update agent preference
                 st.session_state.chatbot_agent.update_general_knowledge_preference(False)
                 try:
-                    strict_response = st.session_state.chatbot_agent.process_message(
+                    raw_strict_response = st.session_state.chatbot_agent.process_message(
                         user_message=comparison_query,
                         conversation_id=st.session_state.conversation_id
                     )
-                    st.text_area("Document-Only Result", strict_response, height=150, key="strict_compare")
+                    formatted_strict_response = st.session_state.response_formatter.format_response(raw_strict_response)
+                    strict_content = formatted_strict_response.get('content', str(raw_strict_response))
+                    st.markdown(strict_content)
                 except Exception as e:
                     st.error(f"Test failed: {str(e)}")
             
@@ -523,11 +548,13 @@ class FlexibleRAGStreamlitApp:
                 # Update agent preference  
                 st.session_state.chatbot_agent.update_general_knowledge_preference(True)
                 try:
-                    hybrid_response = st.session_state.chatbot_agent.process_message(
+                    raw_hybrid_response = st.session_state.chatbot_agent.process_message(
                         user_message=comparison_query,
                         conversation_id=st.session_state.conversation_id
                     )
-                    st.text_area("Hybrid Result", hybrid_response, height=150, key="hybrid_compare")
+                    formatted_hybrid_response = st.session_state.response_formatter.format_response(raw_hybrid_response)
+                    hybrid_content = formatted_hybrid_response.get('content', str(raw_hybrid_response))
+                    st.markdown(hybrid_content)
                 except Exception as e:
                     st.error(f"Test failed: {str(e)}")
             

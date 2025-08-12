@@ -129,22 +129,122 @@ class ChatbotAgent:
             
             tools_text = "\n".join(tool_descriptions)
             
+            # Check current user preference for general knowledge
+            general_knowledge_status = "ENABLED" if self.use_general_knowledge else "DISABLED"
+            
             multi_step_addition = f"""
 
-MULTI-STEP CONVERSATION CAPABILITIES:
-You have access to specialized tools for complex tasks. Use these tools when appropriate to provide comprehensive answers.
+INTELLIGENT TOOL USAGE WITH PRECISE KNOWLEDGE CONTROL:
+
+CURRENT USER SETTING: General Knowledge is {general_knowledge_status}
+
+QUERY HANDLING STRATEGY:
+
+DOCUMENT-ORIENTED QUERIES (always start with rag_search):
+• ALWAYS use rag_search(use_general_knowledge={self.use_general_knowledge}) first for any user query
+• CRITICAL DOCUMENT HANDLING RULES:
+  1. ONLY use information from the documents provided in the context
+  2. NEVER use your general knowledge or training data for document queries
+  3. If the documents don't contain relevant information, do not quote as sources
+  4. Stay strictly within the bounds of the provided documents
+• Always include a "Sources used:" section listing the documents referenced
+• Return rag_search results exactly as provided (includes proper source citations)
+
+BANKING-SPECIFIC QUERIES (intelligent routing):
+• Examples: "Find Wells Fargo", "What are JPMorgan's assets?", "Look up Chase information"
+• First try rag_search for document content about the bank
+• If documents insufficient, then use banking tools: bank_lookup, call_report_data, bank_analysis
+• Banking tools are ALWAYS allowed regardless of General Knowledge setting (they provide factual data)
+
+MIXED QUERIES (sequential approach):
+• Example: "Compare document requirements with Wells Fargo's ratios"
+• Step 1: rag_search for document content
+• Step 2: banking tools for live financial data
+• Step 3: Synthesize with clear source attribution
+
+GENERAL KNOWLEDGE SCOPE CONTROL:
+• ENABLED ({self.use_general_knowledge}): rag_search can supplement documents with general AI knowledge
+• DISABLED ({not self.use_general_knowledge}): rag_search provides ONLY document-based responses, no general knowledge
+• Banking tools: Always provide factual financial data regardless of knowledge setting
+• Other factual tools: Always allowed for specific data retrieval
+
+CRITICAL SOURCE CITATION RULES:
+• rag_search responses: Return exactly as provided (built-in source citations)
+• Banking tools: Cite tool name, bank RSSD ID, and data source
+• Mixed responses: Clearly distinguish document sources vs tool-provided data
+• Never fabricate sources - only cite actual tools used and data retrieved
+
+EXAMPLE BEHAVIORS:
+Query: "What is Wells Fargo?" with General Knowledge DISABLED
+→ 1. rag_search first (documents only, no general knowledge)
+→ 2. If insufficient, use bank_lookup (factual banking data always allowed)
+
+Query: "What does the document say about compliance?" 
+→ rag_search only (respects General Knowledge setting for supplementation)
 
 Available tools:
 {tools_text}
 
-For complex questions:
-1. Break down the request into logical steps
-2. Use appropriate tools to gather information
-3. Synthesize information from multiple sources
-4. Provide a comprehensive response with source attribution
-5. Ask follow-up questions if clarification is needed
+Remember: rag_search has specialized internal prompting for document handling and knowledge control. Banking tools provide factual data and are always permitted.
 
-Always explain your reasoning when using tools and cite sources when applicable."""
+RESPONSE FORMATTING REQUIREMENTS:
+
+OUTPUT FORMAT:
+• Use proper markdown formatting for all responses
+• Structure responses with clear headings using ## and ###
+• Use **bold** for emphasis and important values
+• Use bullet points (-) or numbered lists for organized information
+• Format calculations with proper markdown code blocks using ```
+
+MATHEMATICAL EXPRESSIONS:
+• Present calculations in structured format:
+  - Given values as bullet points
+  - Formula in code block
+  - Step-by-step calculation in code block
+  - Final result emphasized with **bold**
+
+FINANCIAL DATA PRESENTATION:
+• Format currency with $ symbols and proper thousands separators
+• Present ratios as percentages with % symbol
+• Group related financial metrics together
+• Use tables for multiple data points when appropriate
+
+SOURCE CITATIONS:
+• Always end responses with a "## Sources" section
+• List each source as a bullet point with clear identification
+• Include RSSD IDs for banking data
+• Specify document names for RAG sources
+• Use consistent citation format
+
+EXAMPLE STRUCTURE:
+```markdown
+## Analysis Results
+
+**Key Findings:**
+- Finding 1
+- Finding 2
+
+### Calculations
+**Given Values:**
+- Value 1: $123,456
+- Value 2: $789,012
+
+**Formula:**
+```
+Ratio = (Value 1 / Value 2) × 100
+```
+
+**Calculation:**
+```
+= (123,456 / 789,012) × 100 = 15.65%
+```
+
+**Result:** The ratio is **15.65%**
+
+## Sources
+- FFIEC Call Report data (RSSD ID: 123456)
+- Document Name.pdf (specific section)
+```"""
             
             return base_prompt + multi_step_addition
         
@@ -228,12 +328,7 @@ Always explain your reasoning when using tools and cite sources when applicable.
         start_time = time.time()
         
         try:
-            # Check if we have RAG tool and should handle directly
-            rag_tool = self._get_rag_tool()
-            if rag_tool and rag_tool.is_available:
-                return self._handle_with_rag_tool(user_message, rag_tool, start_time)
-            
-            # Fall back to original behavior if no RAG tool
+            # Use multi-step agent executor if available (let it choose the right tool)
             if self.enable_multi_step and self.agent_executor:
                 # Multi-step mode: Use agent executor with RAG tools
                 self.logger.info("Processing with multi-step agent executor")
@@ -345,42 +440,6 @@ Always explain your reasoning when using tools and cite sources when applicable.
         except Exception as e:
             yield self._error_response(f"Streaming error: {str(e)}")
     
-    def _get_rag_tool(self):
-        """Get RAG tool from available tools."""
-        for tool in self.tools:
-            if hasattr(tool, 'is_available') and tool.__class__.__name__ == 'RAGSearchTool':
-                return tool
-        return None
-    
-    def _handle_with_rag_tool(self, user_message: str, rag_tool, start_time: float) -> Dict[str, Any]:
-        """
-        Handle message using RAG tool with agent-controlled settings.
-        
-        Args:
-            user_message: User's message
-            rag_tool: Available RAG tool
-            start_time: Processing start time
-            
-        Returns:
-            Structured response
-        """
-        try:
-            self.logger.info("Processing with agent-controlled RAG tool")
-            
-            # Agent makes the RAG tool call with stored preference
-            import asyncio
-            rag_result = asyncio.run(rag_tool._arun(
-                query=user_message,
-                max_chunks=3,
-                use_general_knowledge=self.use_general_knowledge  # Agent controls this
-            ))
-            
-            # Return the RAG result directly
-            return rag_result
-            
-        except Exception as e:
-            self.logger.error("RAG tool error", error=str(e))
-            return f"I encountered an error searching for information: {str(e)}"
     
     
     def update_general_knowledge_preference(self, use_general_knowledge: bool):
