@@ -5,7 +5,9 @@ Task 11: Enhanced settings with multiple authentication methods and fallback pat
 
 import os
 import logging
-from typing import Optional, Dict, Any
+import time
+import threading
+from typing import Optional, Dict, Any, Tuple
 from pydantic import BaseModel, Field, field_validator, ConfigDict
 from pydantic_settings import BaseSettings
 from azure.identity import (
@@ -22,6 +24,165 @@ import structlog
 logger = structlog.get_logger(__name__).bind(log_type="SECURITY")
 
 
+class _CredentialManager:
+    """
+    Singleton credential manager for caching Azure credentials and secrets.
+    Separated from Pydantic model to avoid serialization issues.
+    """
+    _instance = None
+    _lock = threading.Lock()
+    
+    def __new__(cls):
+        if cls._instance is None:
+            with cls._lock:
+                if cls._instance is None:
+                    cls._instance = super().__new__(cls)
+                    cls._instance._credential_cache = {}
+                    cls._instance._secrets_cache = {}
+                    cls._instance._cache_lock = threading.Lock()
+                    cls._instance._cache_ttl_seconds = 3300  # 55 minutes
+        return cls._instance
+    
+    def get_cached_credential_and_secrets(self, key_vault_url: str, azure_client_id: str) -> Tuple[Any, SecretClient, Dict[str, str]]:
+        """Get cached credential, client, and secrets or create/fetch new ones."""
+        cache_key = (key_vault_url or "", azure_client_id or "")
+        current_time = time.time()
+        
+        with self._cache_lock:
+            # Check if we have valid cached credential and secrets
+            credential_valid = False
+            secrets_valid = False
+            
+            # Check credential cache
+            if cache_key in self._credential_cache:
+                credential, client, cred_timestamp = self._credential_cache[cache_key]
+                if current_time - cred_timestamp < self._cache_ttl_seconds:
+                    credential_valid = True
+                else:
+                    logger.debug("Cached credential expired", 
+                               cache_age_seconds=int(current_time - cred_timestamp))
+                    del self._credential_cache[cache_key]
+            
+            # Check secrets cache
+            cached_secrets = {}
+            if cache_key in self._secrets_cache:
+                cached_secrets, secrets_timestamp = self._secrets_cache[cache_key]
+                if current_time - secrets_timestamp < self._cache_ttl_seconds:
+                    secrets_valid = True
+                else:
+                    logger.debug("Cached secrets expired",
+                               cache_age_seconds=int(current_time - secrets_timestamp))
+                    del self._secrets_cache[cache_key]
+            
+            # If both credential and secrets are cached, return them
+            if credential_valid and secrets_valid:
+                logger.debug("Using cached Azure credential and secrets",
+                           cache_age_seconds=int(current_time - min(cred_timestamp, secrets_timestamp)))
+                return credential, client, cached_secrets
+            
+            # Create new credential if needed
+            if not credential_valid:
+                logger.debug("Creating new Azure credential chain")
+                credential, client = self._create_credential_and_client(key_vault_url, azure_client_id)
+                self._credential_cache[cache_key] = (credential, client, current_time)
+                logger.debug("Cached new Azure credential")
+            
+            # Fetch secrets if not cached (even if credential was cached)
+            if not secrets_valid:
+                logger.debug("Fetching secrets from Key Vault")
+                secrets = self._fetch_all_secrets(client)
+                self._secrets_cache[cache_key] = (secrets, current_time)
+                logger.debug("Cached secrets from Key Vault", secrets_count=len(secrets))
+                return credential, client, secrets
+            else:
+                # Use cached secrets with new credential
+                return credential, client, cached_secrets
+    
+    def _create_credential_and_client(self, key_vault_url: str, azure_client_id: str) -> Tuple[Any, SecretClient]:
+        """Create new Azure credential and Key Vault client."""
+        # Create authentication credential chain
+        credential_chain = []
+        
+        # 1. Try user-assigned managed identity if client_id provided
+        if azure_client_id:
+            logger.debug("Adding user-assigned managed identity to credential chain")
+            credential_chain.append(
+                ManagedIdentityCredential(client_id=azure_client_id)
+            )
+        
+        # 2. Try system-assigned managed identity
+        logger.debug("Adding system-assigned managed identity to credential chain")
+        credential_chain.append(ManagedIdentityCredential())
+        
+        # 3. Try Azure CLI (local development)
+        logger.debug("Adding Azure CLI credential to credential chain")
+        credential_chain.append(AzureCliCredential())
+        
+        # 4. Try environment credential (service principal)
+        logger.debug("Adding environment credential to credential chain")
+        credential_chain.append(EnvironmentCredential())
+        
+        # Create chained credential
+        if len(credential_chain) > 1:
+            credential = ChainedTokenCredential(*credential_chain)
+        else:
+            credential = DefaultAzureCredential()
+        
+        # Create Key Vault client
+        client = SecretClient(vault_url=key_vault_url, credential=credential)
+        
+        # Test credential by attempting to get a token
+        try:
+            credential.get_token("https://vault.azure.net/.default")
+            logger.debug("Successfully authenticated with Azure Key Vault")
+        except Exception as auth_error:
+            logger.warning(
+                "Authentication test failed, but proceeding with Key Vault access",
+                error=str(auth_error)
+            )
+        
+        return credential, client
+    
+    def _fetch_all_secrets(self, client: SecretClient) -> Dict[str, str]:
+        """Fetch all required secrets from Key Vault in one batch."""
+        secrets = {}
+        secret_names = [
+            ("openai-endpoint", "azure_openai_endpoint"),
+            ("openai-api-key", "azure_openai_api_key"), 
+            ("gpt4-deployment-name", "azure_openai_deployment"),
+            ("embedding-deployment-name", "azure_embedding_deployment"),
+            ("applicationinsights-connection-string", "applicationinsights_connection_string"),
+            ("chat-observability-connection-string", "chat_observability_connection_string"),
+        ]
+        
+        for vault_name, settings_key in secret_names:
+            try:
+                logger.debug("Retrieving secret from Key Vault", secret_name=vault_name)
+                secret = client.get_secret(vault_name)
+                secrets[settings_key] = secret.value
+                logger.debug("Successfully retrieved secret", secret_name=vault_name)
+            except Exception as e:
+                logger.warning(
+                    "Failed to retrieve secret from Key Vault",
+                    secret_name=vault_name,
+                    error=str(e)
+                )
+                secrets[settings_key] = None
+        
+        return secrets
+    
+    def clear_cache(self) -> None:
+        """Clear both credential and secrets cache."""
+        with self._cache_lock:
+            self._credential_cache.clear()
+            self._secrets_cache.clear()
+            logger.debug("Cleared Azure credential and secrets cache")
+
+
+# Global credential manager instance
+_credential_manager = _CredentialManager()
+
+
 class Settings(BaseSettings):
     """
     Application settings with Azure Key Vault integration.
@@ -31,6 +192,8 @@ class Settings(BaseSettings):
     2. Azure CLI (local development)
     3. Environment variables (fallback)
     4. Service Principal (CI/CD)
+    
+    Features credential caching for improved performance.
     """
     
     # Key Vault Configuration
@@ -340,9 +503,16 @@ class Settings(BaseSettings):
                     key_vault_url=self.key_vault_url
                 )
     
+    @classmethod
+    def clear_credential_cache(cls) -> None:
+        """
+        Clear the credential cache. Useful for testing or forcing re-authentication.
+        """
+        _credential_manager.clear_cache()
+    
     def _load_from_keyvault(self) -> None:
         """
-        Load configuration from Azure Key Vault using multiple authentication methods.
+        Load configuration from Azure Key Vault using cached credentials for performance.
         
         Authentication chain:
         1. User-assigned managed identity (if azure_client_id provided)
@@ -354,99 +524,42 @@ class Settings(BaseSettings):
         logger.info("Loading configuration from Key Vault", key_vault_url=self.key_vault_url)
         
         try:
-            # Create authentication credential chain
-            credential_chain = []
+            # Get cached credential, client, and secrets
+            credential, client, cached_secrets = _credential_manager.get_cached_credential_and_secrets(
+                self.key_vault_url, self.azure_client_id
+            )
             
-            # 1. Try user-assigned managed identity if client_id provided
-            if self.azure_client_id:
-                logger.debug("Adding user-assigned managed identity to credential chain")
-                credential_chain.append(
-                    ManagedIdentityCredential(client_id=self.azure_client_id)
-                )
-            
-            # 2. Try system-assigned managed identity
-            logger.debug("Adding system-assigned managed identity to credential chain")
-            credential_chain.append(ManagedIdentityCredential())
-            
-            # 3. Try Azure CLI (local development)
-            logger.debug("Adding Azure CLI credential to credential chain")
-            credential_chain.append(AzureCliCredential())
-            
-            # 4. Try environment credential (service principal)
-            logger.debug("Adding environment credential to credential chain")
-            credential_chain.append(EnvironmentCredential())
-            
-            # Create chained credential
-            if len(credential_chain) > 1:
-                credential = ChainedTokenCredential(*credential_chain)
-            else:
-                credential = DefaultAzureCredential()
-            
-            # Create Key Vault client
-            client = SecretClient(vault_url=self.key_vault_url, credential=credential)
-            
-            # Test credential by attempting to get a token
-            # This helps identify authentication issues early
-            try:
-                credential.get_token("https://vault.azure.net/.default")
-                logger.debug("Successfully authenticated with Azure Key Vault")
-            except Exception as auth_error:
-                logger.warning(
-                    "Authentication test failed, but proceeding with Key Vault access",
-                    error=str(auth_error)
-                )
-            
-            # Load secrets with fallback to current values
+            # Apply cached secrets to settings with fallback to current values
             secrets_loaded = 0
             
             # Azure OpenAI endpoint
-            endpoint = self._get_secret_or_fallback(
-                client, "openai-endpoint", self.azure_openai_endpoint
-            )
-            if endpoint != self.azure_openai_endpoint:
-                self.azure_openai_endpoint = endpoint
+            if cached_secrets.get("azure_openai_endpoint") and cached_secrets["azure_openai_endpoint"] != self.azure_openai_endpoint:
+                self.azure_openai_endpoint = cached_secrets["azure_openai_endpoint"]
                 secrets_loaded += 1
             
-            # Azure OpenAI API key
-            api_key = self._get_secret_or_fallback(
-                client, "openai-api-key", self.azure_openai_api_key
-            )
-            if api_key != self.azure_openai_api_key:
-                self.azure_openai_api_key = api_key
+            # Azure OpenAI API key  
+            if cached_secrets.get("azure_openai_api_key") and cached_secrets["azure_openai_api_key"] != self.azure_openai_api_key:
+                self.azure_openai_api_key = cached_secrets["azure_openai_api_key"]
                 secrets_loaded += 1
             
             # Azure OpenAI deployment name
-            deployment = self._get_secret_or_fallback(
-                client, "gpt4-deployment-name", self.azure_openai_deployment
-            )
-            if deployment != self.azure_openai_deployment:
-                self.azure_openai_deployment = deployment
+            if cached_secrets.get("azure_openai_deployment") and cached_secrets["azure_openai_deployment"] != self.azure_openai_deployment:
+                self.azure_openai_deployment = cached_secrets["azure_openai_deployment"]
                 secrets_loaded += 1
             
             # Azure embedding deployment name
-            embedding_deployment = self._get_secret_or_fallback(
-                client, "embedding-deployment-name", self.azure_embedding_deployment
-            )
-            if embedding_deployment != self.azure_embedding_deployment:
-                self.azure_embedding_deployment = embedding_deployment
+            if cached_secrets.get("azure_embedding_deployment") and cached_secrets["azure_embedding_deployment"] != self.azure_embedding_deployment:
+                self.azure_embedding_deployment = cached_secrets["azure_embedding_deployment"]
                 secrets_loaded += 1
             
             # Application Insights connection string
-            app_insights = self._get_secret_or_fallback(
-                client, "applicationinsights-connection-string", 
-                self.applicationinsights_connection_string
-            )
-            if app_insights != self.applicationinsights_connection_string:
-                self.applicationinsights_connection_string = app_insights
+            if cached_secrets.get("applicationinsights_connection_string") and cached_secrets["applicationinsights_connection_string"] != self.applicationinsights_connection_string:
+                self.applicationinsights_connection_string = cached_secrets["applicationinsights_connection_string"]
                 secrets_loaded += 1
             
             # Chat Observability connection string
-            chat_observability = self._get_secret_or_fallback(
-                client, "chat-observability-connection-string",
-                self.chat_observability_connection_string
-            )
-            if chat_observability != self.chat_observability_connection_string:
-                self.chat_observability_connection_string = chat_observability
+            if cached_secrets.get("chat_observability_connection_string") and cached_secrets["chat_observability_connection_string"] != self.chat_observability_connection_string:
+                self.chat_observability_connection_string = cached_secrets["chat_observability_connection_string"]
                 secrets_loaded += 1
             
             logger.info(

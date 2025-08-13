@@ -106,6 +106,20 @@ class FlexibleRAGStreamlitApp:
         # Document state
         if "uploaded_documents" not in st.session_state:
             st.session_state.uploaded_documents = []
+        
+        # Tab state tracking for conditional loading
+        if "active_tab" not in st.session_state:
+            st.session_state.active_tab = "chat"
+        
+        # Document cache state
+        if "documents_cache" not in st.session_state:
+            st.session_state.documents_cache = None
+        
+        if "documents_cache_timestamp" not in st.session_state:
+            st.session_state.documents_cache_timestamp = None
+        
+        if "force_documents_refresh" not in st.session_state:
+            st.session_state.force_documents_refresh = False
     
     def _create_chatbot_agent(self):
         """Create or recreate the chatbot agent with current settings."""
@@ -133,6 +147,23 @@ class FlexibleRAGStreamlitApp:
             tool_count=len(all_tools),
             use_general_knowledge=st.session_state.use_general_knowledge
         )
+    
+    def _should_refresh_documents_cache(self) -> bool:
+        """Check if documents cache should be refreshed."""
+        import time
+        
+        if st.session_state.force_documents_refresh:
+            return True
+        
+        if st.session_state.documents_cache is None:
+            return True
+        
+        if st.session_state.documents_cache_timestamp is None:
+            return True
+        
+        # Refresh if cache is older than 30 seconds
+        cache_age = time.time() - st.session_state.documents_cache_timestamp
+        return cache_age > 30
     
     def _get_rag_mode_description(self) -> str:
         """Get description of current RAG mode."""
@@ -301,11 +332,14 @@ class FlexibleRAGStreamlitApp:
             st.error(f"Test failed: {str(e)}")
     
     def _render_document_management(self):
-        """Render document management interface."""
+        """Render document management interface with conditional loading."""
         st.subheader("📚 Document Management")
         st.markdown("Upload documents to enable document-based responses.")
         
-        # File upload
+        # Mark that we're in the documents tab
+        st.session_state.active_tab = "documents"
+        
+        # File upload section - always available
         uploaded_files = st.file_uploader(
             "Choose files to upload",
             accept_multiple_files=True,
@@ -316,31 +350,60 @@ class FlexibleRAGStreamlitApp:
         if uploaded_files:
             if st.button("📤 Process Documents", type="primary"):
                 self._process_uploaded_files(uploaded_files)
+                # Force refresh of documents cache after upload
+                st.session_state.force_documents_refresh = True
         
-        # Show current documents
+        # Document list section - conditionally loaded
         st.subheader("📋 Current Documents")
-        try:
-            documents = asyncio.run(st.session_state.document_manager.list_documents())
+        
+        # Add refresh button
+        col1, col2 = st.columns([3, 1])
+        with col1:
+            st.write("") # Spacer
+        with col2:
+            if st.button("🔄 Refresh", key="refresh_docs"):
+                st.session_state.force_documents_refresh = True
+        
+        # Only load documents when needed
+        if self._should_refresh_documents_cache():
+            with st.spinner("Loading documents..."):
+                try:
+                    import time
+                    documents = asyncio.run(st.session_state.document_manager.list_documents())
+                    st.session_state.documents_cache = documents
+                    st.session_state.documents_cache_timestamp = time.time()
+                    st.session_state.force_documents_refresh = False
+                except Exception as e:
+                    st.error(f"Error loading documents: {str(e)}")
+                    st.session_state.documents_cache = []
+        
+        # Display cached documents
+        documents = st.session_state.documents_cache
+        
+        if documents:
+            # Show document count
+            st.info(f"📊 Total documents: {len(documents)}")
             
-            if documents:
-                for i, doc in enumerate(documents):
-                    with st.expander(f"📄 {doc['filename']} ({doc['chunk_count']} chunks)"):
-                        col1, col2 = st.columns([3, 1])
-                        
-                        with col1:
-                            st.write(f"**Type**: {doc['file_type'].upper()}")
-                            st.write(f"**Chunks**: {doc['chunk_count']}")
-                            st.write(f"**Size**: {doc['size_bytes'] / (1024*1024):.2f} MB")
-                            st.write(f"**Uploaded**: {doc['upload_timestamp']}")
-                        
-                        with col2:
-                            if st.button("🗑️ Delete", key=f"delete_{i}"):
-                                self._delete_document(doc['filename'])
-            else:
+            for i, doc in enumerate(documents):
+                with st.expander(f"📄 {doc['filename']} ({doc['chunk_count']} chunks)"):
+                    col1, col2 = st.columns([3, 1])
+                    
+                    with col1:
+                        st.write(f"**Type**: {doc['file_type'].upper()}")
+                        st.write(f"**Chunks**: {doc['chunk_count']}")
+                        st.write(f"**Size**: {doc['size_bytes'] / (1024*1024):.2f} MB")
+                        st.write(f"**Uploaded**: {doc['upload_timestamp']}")
+                    
+                    with col2:
+                        if st.button("🗑️ Delete", key=f"delete_{i}"):
+                            self._delete_document(doc['filename'])
+                            # Force refresh after deletion
+                            st.session_state.force_documents_refresh = True
+        else:
+            if st.session_state.documents_cache is not None:  # Cache loaded but empty
                 st.info("📄 No documents uploaded yet.")
-                
-        except Exception as e:
-            st.error(f"Error loading documents: {str(e)}")
+            else:  # Still loading
+                st.info("📄 Click refresh to load documents or upload new ones.")
     
     def _process_uploaded_files(self, uploaded_files):
         """Process uploaded files."""
@@ -375,6 +438,11 @@ class FlexibleRAGStreamlitApp:
             progress_bar.progress(1.0)
             status_text.text("✅ All documents processed!")
             
+            # Clear the cache to show new documents
+            st.session_state.documents_cache = None
+            st.session_state.documents_cache_timestamp = None
+            st.session_state.force_documents_refresh = True
+            
             # Clear progress after a moment
             import time
             time.sleep(2)
@@ -389,7 +457,7 @@ class FlexibleRAGStreamlitApp:
             st.error(f"Error processing documents: {str(e)}")
     
     def _delete_document(self, filename: str):
-        """Delete a document."""
+        """Delete a document with cache invalidation."""
         try:
             st.info(f"🗑️ Attempting to delete: {filename}")
             with st.spinner(f"Deleting {filename}..."):
@@ -401,6 +469,12 @@ class FlexibleRAGStreamlitApp:
             
             if result.success:
                 st.success(f"✅ Deleted {filename}")
+                
+                # Clear the cache to force refresh
+                st.session_state.documents_cache = None
+                st.session_state.documents_cache_timestamp = None
+                st.session_state.force_documents_refresh = True
+                
                 # Force refresh of the page to update document list
                 st.rerun()
             else:
