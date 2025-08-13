@@ -143,10 +143,10 @@ class FlexibleRAGStreamlitApp:
     
     def run(self):
         """Run the main Streamlit application."""
-        st.title("🤖 RAG Chatbot - Flexible Mode")
-        st.markdown("**Control whether the chatbot uses only documents or can fall back to general knowledge.**")
+        st.title("Bank Chatbot - Credit Compliance Focus")
+        st.markdown("**AI Chatbot using contextual knowledge and financial data tools**")
         
-        # Show current mode prominently
+        # Show current mode prominently (dynamically updated)
         mode_description = self._get_rag_mode_description()
         if st.session_state.use_general_knowledge:
             st.info(f"🔄 {mode_description}")
@@ -170,58 +170,15 @@ class FlexibleRAGStreamlitApp:
         
         with tab4:
             self._render_system_status()
+        
+        # Move chat input outside of tabs for proper bottom positioning
+        if prompt := st.chat_input("Ask about your documents or general topics..."):
+            self._handle_chat_input(prompt)
     
     def _show_rag_controls(self):
         """Show RAG mode controls and status."""
-        with st.container():
-            col1, col2, col3 = st.columns([2, 2, 2])
-            
-            with col1:
-                # Main control toggle
-                new_general_knowledge = st.checkbox(
-                    "🧠 Use AI General Knowledge",
-                    value=st.session_state.use_general_knowledge,
-                    help="When enabled: Use documents first, fall back to general knowledge if no documents found.\n"
-                         "When disabled: Only respond based on uploaded documents, refuse general knowledge questions.",
-                    key="general_knowledge_toggle"
-                )
-                
-                # If the setting changed, recreate the agent with new preference
-                if new_general_knowledge != st.session_state.use_general_knowledge:
-                    st.session_state.use_general_knowledge = new_general_knowledge
-                    self._create_chatbot_agent()  # Recreate agent with new preference
-                    st.success(f"Switched to {'Hybrid' if new_general_knowledge else 'Document-Only'} mode")
-            
-            with col2:
-                # RAG tool status
-                rag_available = st.session_state.rag_tool.is_available
-                if rag_available:
-                    st.success("✅ RAG Tool: Available")
-                else:
-                    st.error("❌ RAG Tool: Not Available")
-                
-                # Document count
-                try:
-                    stats = asyncio.run(st.session_state.document_manager.get_statistics())
-                    doc_count = stats.total_documents
-                    if doc_count > 0:
-                        st.metric("Documents", doc_count)
-                    else:
-                        st.info("📄 No documents uploaded")
-                except Exception:
-                    st.warning("📄 Documents: Unknown")
-            
-            with col3:
-                # Agent status
-                agent = st.session_state.chatbot_agent
-                tool_count = len(agent.tools) if hasattr(agent, 'tools') else 0
-                st.metric("Agent Tools", tool_count)
-                
-                # Show current effective mode
-                if st.session_state.use_general_knowledge:
-                    st.success("🔄 Hybrid Mode Active")
-                else:
-                    st.warning("🔒 Strict Mode Active")
+        # Controls moved to sidebar, this method can be simplified or removed
+        pass
     
     def _render_chat_interface(self):
         """Render the main chat interface."""
@@ -230,37 +187,33 @@ class FlexibleRAGStreamlitApp:
         with st.sidebar:
             st.header("⚙️ Chat Settings")
             
+            # Main control toggle (moved from col1)
+            new_general_knowledge = st.checkbox(
+                "🧠 Use AI General Knowledge",
+                value=st.session_state.use_general_knowledge,
+                help="When enabled: Use documents first, fall back to general knowledge if no documents found.\n"
+                     "When disabled: Only respond based on uploaded documents, refuse general knowledge questions.",
+                key="general_knowledge_toggle"
+            )
+            
+            # If the setting changed, recreate the agent with new preference
+            if new_general_knowledge != st.session_state.use_general_knowledge:
+                st.session_state.use_general_knowledge = new_general_knowledge
+                self._create_chatbot_agent()  # Recreate agent with new preference
+                st.success(f"Switched to {'Hybrid' if new_general_knowledge else 'Document-Only'} mode")
+                st.rerun()  # Force page refresh to update main mode display
+            
             # Show current mode
             mode_color = "blue" if st.session_state.use_general_knowledge else "orange"
             mode_text = "Hybrid" if st.session_state.use_general_knowledge else "Document-Only"
             st.markdown(f"**Current Mode:** :{mode_color}[{mode_text}]")
-            
-            # Additional settings
-            st.session_state.show_sources = st.checkbox(
-                "📚 Show Sources", 
-                value=st.session_state.show_sources,
-                help="Display document sources in responses"
-            )
-            
-            st.divider()
-            
-            # Quick test buttons
-            st.subheader("🧪 Quick Tests")
-            
-            if st.button("📄 Test: Document Query"):
-                self._test_document_query()
-            
-            if st.button("🧠 Test: General Knowledge"):
-                self._test_general_knowledge_query()
         
         # Display chat messages
         for message in st.session_state.messages:
             with st.chat_message(message["role"]):
                 st.markdown(message["content"])
         
-        # Chat input
-        if prompt := st.chat_input("Ask about your documents or general topics..."):
-            self._handle_chat_input(prompt)
+        # Chat input moved to main run() method for proper bottom positioning
     
     def _handle_chat_input(self, prompt: str):
         """Handle user chat input - let agent control everything."""
@@ -272,7 +225,7 @@ class FlexibleRAGStreamlitApp:
         
         # Generate response using agent
         with st.chat_message("assistant"):
-            with st.spinner("Thinking..." if st.session_state.use_general_knowledge else "Searching documents only..."):
+            with st.spinner("Thinking..."):
                 try:
                     # Get raw response from agent
                     raw_response = st.session_state.chatbot_agent.process_message(
