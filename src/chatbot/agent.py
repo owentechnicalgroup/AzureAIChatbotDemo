@@ -166,7 +166,30 @@ GENERAL KNOWLEDGE SCOPE CONTROL:
 • ENABLED ({self.use_general_knowledge}): rag_search can supplement documents with general AI knowledge
 • DISABLED ({not self.use_general_knowledge}): rag_search provides ONLY document-based responses, no general knowledge
 • Banking tools: Always provide factual financial data regardless of knowledge setting
-• Other factual tools: Always allowed for specific data retrieval
+• Other factual tools: Always allowed for specific data retrieval"""
+            
+            # Add strict enforcement rules only when general knowledge is disabled
+            if not self.use_general_knowledge:
+                strict_enforcement = """
+
+STRICT ENFORCEMENT - DOCUMENT-ONLY MODE:
+⚠️  CRITICAL RESTRICTIONS WHEN GENERAL KNOWLEDGE IS DISABLED:
+• DO NOT use any information from your training data about banking, finance, regulations, or Federal Reserve
+• DO NOT reference "Federal Reserve Bank reporting manuals", "banking regulations", or "standard practices" unless they appear in the actual document search results
+• DO NOT explain banking concepts, FFIEC requirements, or regulatory procedures unless explicitly found in retrieved documents
+• If document search results are insufficient or empty, you MUST respond: "I don't have enough information in the available documents to answer this question."
+• NEVER use phrases like "based on general banking knowledge", "typically in banking", "standard practice", or "according to regulations"
+• ONLY use information that comes directly from the rag_search tool results or banking data tools (bank_lookup, call_report_data)
+• When combining document and tool data, clearly distinguish: "According to the documents..." vs "According to the call report data..."
+• If no documents are found but banking tools have data, clearly state: "While I don't have document information about this, the banking data shows..."
+
+COMPLIANCE CHECK - Before responding, ask yourself:
+1. Did this information come from rag_search results or banking tools?
+2. Am I drawing from my general knowledge about banking/finance?
+3. If documents are insufficient, did I say so clearly?"""
+                multi_step_addition += strict_enforcement
+            
+            multi_step_addition += f"""
 
 CRITICAL SOURCE CITATION RULES:
 • rag_search responses: Return exactly as provided (built-in source citations)

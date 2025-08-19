@@ -178,10 +178,45 @@ class CallReportMockAPI:
             "field_name": "Tier 1 capital"
         }
         
+        field_data["RCON7273"] = {  # Common Equity Tier 1 Capital
+            "value": Decimal(str(round(base_assets * 0.125, 2))),  # ~12.5% CET1
+            "schedule": "RCR",
+            "field_name": "Common equity tier 1 capital"
+        }
+        
+        field_data["RCON8275"] = {  # Total Capital
+            "value": Decimal(str(round(base_assets * 0.16, 2))),  # ~16% Total Capital
+            "schedule": "RCR",
+            "field_name": "Total capital"
+        }
+        
         field_data["RCON0023"] = {  # Risk-Weighted Assets
             "value": Decimal(str(round(base_assets * 0.75, 2))),  # ~75% RWA
             "schedule": "RCR",
             "field_name": "Risk-weighted assets"
+        }
+        
+        # Capital Ratios (RCR) - as percentages
+        cet1_ratio = (float(field_data["RCON7273"]["value"]) / float(field_data["RCON0023"]["value"])) * 100
+        tier1_ratio = (float(field_data["RCON8274"]["value"]) / float(field_data["RCON0023"]["value"])) * 100
+        total_capital_ratio = (float(field_data["RCON8275"]["value"]) / float(field_data["RCON0023"]["value"])) * 100
+        
+        field_data["RCON7204"] = {  # CET1 Capital Ratio
+            "value": Decimal(str(round(cet1_ratio, 2))),
+            "schedule": "RCR", 
+            "field_name": "Common equity tier 1 capital ratio"
+        }
+        
+        field_data["RCON7206"] = {  # Tier 1 Capital Ratio
+            "value": Decimal(str(round(tier1_ratio, 2))),
+            "schedule": "RCR",
+            "field_name": "Tier 1 capital ratio"
+        }
+        
+        field_data["RCON7205"] = {  # Total Capital Ratio
+            "value": Decimal(str(round(total_capital_ratio, 2))),
+            "schedule": "RCR",
+            "field_name": "Total capital ratio"
         }
         
         # Asset Quality (RCN) fields
@@ -189,6 +224,31 @@ class CallReportMockAPI:
             "value": Decimal(str(round(base_assets * 0.005, 2))),  # ~0.5% nonaccrual
             "schedule": "RCN",
             "field_name": "Nonaccrual loans and leases"
+        }
+        
+        # Quarterly Averages (RCK) fields
+        field_data["RCON3368"] = {  # Average Total Consolidated Assets
+            "value": Decimal(str(round(base_assets * 1.02, 2))),  # Slightly higher than quarter-end
+            "schedule": "RCK",
+            "field_name": "Average total consolidated assets"
+        }
+        
+        field_data["RCON3365"] = {  # Average Securities
+            "value": Decimal(str(round(base_assets * 0.24, 2))),  # ~24% average securities
+            "schedule": "RCK",
+            "field_name": "Average securities"
+        }
+        
+        field_data["RCON3360"] = {  # Average Total Loans
+            "value": Decimal(str(round(base_assets * 0.66, 2))),  # ~66% average loans
+            "schedule": "RCK",
+            "field_name": "Average total loans and leases"
+        }
+        
+        field_data["RCON3381"] = {  # Average Total Deposits
+            "value": Decimal(str(round(base_assets * 0.84, 2))),  # ~84% average deposits
+            "schedule": "RCK",
+            "field_name": "Average total deposits"
         }
         
         return field_data

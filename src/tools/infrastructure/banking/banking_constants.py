@@ -90,7 +90,8 @@ RCR_CAPITAL_FIELDS = {
     "RCON7204": "Common equity tier 1 capital ratio",
     "RCON7206": "Tier 1 capital ratio",
     "RCON7205": "Total capital ratio",
-    "RCON7219": "Leverage ratio"
+    "RCON7219": "Leverage ratio",
+    "RCON7273": "Common equity tier 1 capital"  # CET1 Capital amount
 }
 
 # Asset Quality Fields (RC-N Schedule)
@@ -102,12 +103,21 @@ RCN_ASSET_QUALITY_FIELDS = {
     "RCON1407": "Allowance for credit losses on loans and leases"
 }
 
+# Quarterly Averages Fields (RC-K Schedule)
+RCK_QUARTERLY_AVERAGES_FIELDS = {
+    "RCON3368": "Average total consolidated assets",
+    "RCON3365": "Average securities",
+    "RCON3360": "Average total loans and leases",
+    "RCON3381": "Average total deposits"
+}
+
 # All Field Mappings Combined
 ALL_FIELD_MAPPINGS = {
     **RC_BALANCE_SHEET_FIELDS,
     **RI_INCOME_STATEMENT_FIELDS,
     **RCR_CAPITAL_FIELDS,
-    **RCN_ASSET_QUALITY_FIELDS
+    **RCN_ASSET_QUALITY_FIELDS,
+    **RCK_QUARTERLY_AVERAGES_FIELDS
 }
 
 # Rename this to avoid conflict with the constant above
@@ -122,7 +132,9 @@ FIELD_TO_SCHEDULE = {
     # RC-R Schedule fields
     **{field_id: "RCR" for field_id in RCR_CAPITAL_FIELDS.keys()},
     # RC-N Schedule fields
-    **{field_id: "RCN" for field_id in RCN_ASSET_QUALITY_FIELDS.keys()}
+    **{field_id: "RCN" for field_id in RCN_ASSET_QUALITY_FIELDS.keys()},
+    # RC-K Schedule fields
+    **{field_id: "RCK" for field_id in RCK_QUARTERLY_AVERAGES_FIELDS.keys()}
 }
 
 # Financial Ratio Field Requirements
