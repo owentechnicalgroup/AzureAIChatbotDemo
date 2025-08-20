@@ -452,6 +452,11 @@ class Settings(BaseSettings):
         env='TMDB_API_KEY',
         description="The Movie Database API key for movie ratings"
     )
+    fdic_api_key: Optional[str] = Field(
+        None,
+        env='FDIC_API_KEY',
+        description="FDIC BankFind Suite API key for bank institution data"
+    )
     
     # Feature Flags
     enable_conversation_logging: bool = Field(

@@ -68,6 +68,7 @@ class ServiceAvailabilityChecker:
             "chromadb": self._check_chromadb_availability,
             "call_report_api": self._check_call_report_api_availability,
             "web_search_api": self._check_web_search_api_availability,
+            "fdic_api": self._check_fdic_api_availability,
         }
     
     async def check_service_availability(self, service_name: str) -> bool:
@@ -223,6 +224,50 @@ class ServiceAvailabilityChecker:
         """
         # For now, web search is not implemented
         return False
+    
+    async def _check_fdic_api_availability(self) -> bool:
+        """
+        Check FDIC BankFind Suite API availability.
+        
+        Returns:
+            True if FDIC API is accessible and responding
+        """
+        try:
+            # Import FDIC API client here to avoid circular imports
+            from .infrastructure.banking.fdic_api_client import FDICAPIClient
+            
+            # Initialize client with settings
+            client = FDICAPIClient(
+                api_key=self.settings.fdic_api_key,
+                timeout=max(5.0, self.settings.tools_timeout_seconds / 2)  # Use shorter timeout for health checks
+            )
+            
+            # Check if client is properly configured
+            if not client.is_available():
+                self.logger.debug("FDIC API client not properly configured")
+                return False
+            
+            # Perform health check
+            health_check_result = await client.health_check()
+            
+            self.logger.debug(
+                "FDIC API availability check completed",
+                available=health_check_result,
+                has_api_key=bool(self.settings.fdic_api_key)
+            )
+            
+            return health_check_result
+            
+        except ImportError:
+            self.logger.warning("FDIC API client not available - missing dependencies")
+            return False
+        except Exception as e:
+            self.logger.warning(
+                "FDIC API availability check failed",
+                error=str(e),
+                error_type=type(e).__name__
+            )
+            return False
     
     def clear_cache(self):
         """Clear the availability cache to force fresh checks."""

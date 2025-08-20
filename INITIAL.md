@@ -16,10 +16,11 @@
 ## EXAMPLES:
 
 In the `examples/` folder, there is a README for you to read to understand what the example is all about and also how to structure your own README when you create documentation for the above feature.
+
 - `examples/aopenai` - This repository provides practical resources and code samples for building solutions with Azure OpenAI Service, Azure AI Foundry, and advanced agent-based architectures
 - `examples/azure_openai_langchain_sample` - This repository contains various examples of how to use LangChain, a way to use natural language to interact with LLM, a large language model from Azure OpenAI Service
 - `examples/sample-app-aoai-chatGPT` - Sample code for a simple web chat experience through Azure OpenAI, including Azure OpenAI On Your Data
-Don't copy any of these examples directly, it is for a different project entirely. But use this as inspiration and for best practices.
+  Don't copy any of these examples directly, it is for a different project entirely. But use this as inspiration and for best practices.
 
 ## DOCUMENTATION:
 

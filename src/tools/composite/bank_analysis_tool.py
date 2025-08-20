@@ -20,40 +20,64 @@ from langchain.callbacks.manager import (
 
 from ..atomic.bank_lookup_tool import BankLookupTool
 from ..infrastructure.banking.call_report_api import CallReportMockAPI
+from ..infrastructure.banking.fdic_models import BankAnalysisInput
 
 logger = structlog.get_logger(__name__).bind(log_type="SYSTEM")
 
 
-class BankAnalysisInput(BaseModel):
-    """Input schema for bank analysis tool."""
-    bank_name: Optional[str] = Field(default=None, description="Bank name to search for (alternative to rssd_id)")
-    rssd_id: Optional[str] = Field(default=None, description="Bank RSSD ID (alternative to bank_name)")
-    query_type: str = Field(default="basic_info", description="Type of analysis: 'basic_info', 'financial_summary', or 'key_ratios'")
-
-
 class BankAnalysisTool(BaseTool):
     """
-    LangChain-compatible bank analysis tool that handles complete workflows.
+    Enhanced LangChain-compatible bank analysis tool with FDIC API integration.
     
-    Combines bank lookup with Call Report data retrieval to answer
-    common banking queries in a single tool call.
+    Combines real-time FDIC bank lookup with Call Report data retrieval to answer
+    comprehensive banking queries in a single tool call using live data.
     """
     
     name: str = "bank_analysis"
-    description: str = """Complete banking analysis tool - look up banks and get financial data in one call.
+    description: str = """Enhanced banking analysis tool with FDIC API integration for comprehensive financial analysis.
 
-Use this tool for comprehensive banking queries that need financial information.
-Supports multiple query types:
-- basic_info: Bank identification and basic financial data
-- financial_summary: Key financial metrics (assets, deposits, loans)
-- key_ratios: Important financial ratios (ROA, ROE, efficiency)
+This tool combines real-time FDIC bank identification with Call Report data to provide
+complete banking analysis workflows. Uses live FDIC data for accurate bank identification.
 
-Either bank_name OR rssd_id is required.
+Enhanced Search and Analysis Capabilities:
+- Real-time bank identification using FDIC BankFind Suite API
+- Location-based bank identification (city, state filtering) 
+- Multiple analysis types with financial data integration
+- Comprehensive institution details and financial metrics
 
-Example: Get basic info for JPMorgan Chase
-- bank_name: "JPMorgan Chase"
-- query_type: "basic_info"
-"""
+Analysis Types:
+- basic_info: Bank identification, location, assets, and regulatory information
+- financial_summary: Key financial metrics (assets, deposits, loans, capital ratios)  
+- key_ratios: Important financial ratios (ROA, ROE, efficiency, capital adequacy)
+
+Search Options:
+- bank_name: Institution name with fuzzy matching
+- rssd_id: Specific RSSD identifier (most precise)
+- city: Filter banks by city location
+- state: Filter banks by state (2-letter abbreviation)
+
+Example Usage:
+
+1. Basic bank analysis:
+   - bank_name: "JPMorgan Chase"
+   - query_type: "basic_info"
+
+2. Analysis with location specificity:
+   - bank_name: "First National Bank"
+   - city: "Chicago" 
+   - state: "IL"
+   - query_type: "financial_summary"
+
+3. Direct RSSD lookup:
+   - rssd_id: "451965"
+   - query_type: "key_ratios"
+
+4. Location-based discovery:
+   - city: "Charlotte"
+   - state: "NC"
+   - query_type: "basic_info"
+
+Returns: Comprehensive analysis combining FDIC institution data with Call Report financial metrics."""
     
     args_schema: Type[BaseModel] = BankAnalysisInput
     
@@ -82,9 +106,11 @@ Example: Get basic info for JPMorgan Chase
         bank_name: Optional[str] = None,
         rssd_id: Optional[str] = None,
         query_type: str = "basic_info",
+        city: Optional[str] = None,
+        state: Optional[str] = None,
         run_manager: Optional[CallbackManagerForToolRun] = None,
     ) -> str:
-        """Synchronous execution."""
+        """Synchronous execution with enhanced FDIC search support."""
         try:
             # Try to get the current event loop
             loop = asyncio.get_running_loop()
@@ -94,28 +120,32 @@ Example: Get basic info for JPMorgan Chase
             # Create a new event loop in a thread pool
             with concurrent.futures.ThreadPoolExecutor() as executor:
                 future = executor.submit(
-                    lambda: asyncio.run(self._arun(bank_name, rssd_id, query_type, run_manager))
+                    lambda: asyncio.run(self._arun(bank_name, rssd_id, query_type, city, state, run_manager))
                 )
                 return future.result()
                 
         except RuntimeError:
             # No event loop running, safe to use asyncio.run
-            return asyncio.run(self._arun(bank_name, rssd_id, query_type, run_manager))
+            return asyncio.run(self._arun(bank_name, rssd_id, query_type, city, state, run_manager))
     
     async def _arun(
         self,
         bank_name: Optional[str] = None,
         rssd_id: Optional[str] = None,
         query_type: str = "basic_info",
+        city: Optional[str] = None,
+        state: Optional[str] = None,
         run_manager: Optional[AsyncCallbackManagerForToolRun] = None,
     ) -> str:
         """
-        Execute comprehensive bank analysis.
+        Execute comprehensive bank analysis with enhanced FDIC integration.
         
         Args:
             bank_name: Bank name to search for (alternative to rssd_id)
             rssd_id: Bank RSSD ID (alternative to bank_name)
             query_type: Type of analysis to perform
+            city: City to help identify the bank
+            state: State abbreviation to help identify the bank
             run_manager: Optional callback manager
             
         Returns:
@@ -123,22 +153,26 @@ Example: Get basic info for JPMorgan Chase
         """
         try:
             logger.info(
-                "Executing bank analysis",
+                "Executing enhanced bank analysis with FDIC integration",
                 bank_name=bank_name,
                 rssd_id=rssd_id,
+                city=city,
+                state=state,
                 query_type=query_type
             )
             
-            # Validate inputs
-            if not bank_name and not rssd_id:
-                return "Error: Either bank_name or rssd_id must be provided"
+            # Enhanced validation - support multiple identification methods
+            if not any([bank_name, rssd_id, city]):
+                return "Error: At least one identifier must be provided (bank_name, rssd_id, or city with state)"
             
             # Step 1: Get bank information if we need to look up the bank
             bank_info = None
-            if bank_name and not rssd_id:
-                # Use bank lookup to find RSSD ID
+            if not rssd_id:
+                # Use enhanced bank lookup with location parameters
                 lookup_result = await self.bank_lookup._arun(
                     search_term=bank_name,
+                    city=city,
+                    state=state,
                     fuzzy_match=True,
                     max_results=1
                 )

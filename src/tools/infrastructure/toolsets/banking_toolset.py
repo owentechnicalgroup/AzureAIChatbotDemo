@@ -1,8 +1,8 @@
 """
-LangChain-native Banking toolset for dynamic loading.
+Enhanced LangChain-native Banking toolset with FDIC integration.
 
-Provides a coordinated set of banking tools that extend langchain.tools.BaseTool
-for seamless integration with the dynamic tool loading system.
+Provides a coordinated set of banking tools with FDIC BankFind Suite API integration
+that extend langchain.tools.BaseTool for seamless integration with the dynamic tool loading system.
 """
 
 from typing import List, Dict, Any
@@ -20,10 +20,10 @@ logger = structlog.get_logger(__name__).bind(log_type="SYSTEM")
 
 class BankingToolset:
     """
-    LangChain-native Banking toolset for dynamic loading.
+    Enhanced LangChain-native Banking toolset with FDIC API integration.
     
-    Manages a collection of banking tools that properly extend
-    langchain.tools.BaseTool for use with the enhanced tool loading system.
+    Manages a collection of banking tools with FDIC BankFind Suite API integration
+    that properly extend langchain.tools.BaseTool for use with the enhanced tool loading system.
     """
     
     def __init__(self, settings: Settings):
@@ -44,24 +44,26 @@ class BankingToolset:
         self._initialize_tools()
         
         self.logger.info(
-            "LangChain Banking toolset initialized",
+            "Enhanced LangChain Banking toolset initialized with FDIC integration",
             tools_count=len(self._tools),
-            tool_names=[tool.name for tool in self._tools]
+            tool_names=[tool.name for tool in self._tools],
+            has_fdic_api_key=bool(settings.fdic_api_key)
         )
     
     def _initialize_tools(self) -> None:
-        """Initialize all LangChain Banking tools."""
+        """Initialize all enhanced LangChain Banking tools with FDIC integration."""
         try:
-            # Create LangChain-native tools
-            bank_lookup = BankLookupTool()
+            # Create FDIC-enhanced LangChain-native tools
+            bank_lookup = BankLookupTool(settings=self.settings)
             call_report_data = CallReportDataTool(api_client=self.api_client)
-            bank_analysis = BankAnalysisTool()
+            bank_analysis = BankAnalysisTool()  # Uses enhanced BankLookupTool internally
             
             self._tools = [bank_lookup, call_report_data, bank_analysis]
             
             self.logger.info(
-                "LangChain Banking tools initialized",
-                tool_count=len(self._tools)
+                "Enhanced LangChain Banking tools with FDIC integration initialized",
+                tool_count=len(self._tools),
+                fdic_integration=True
             )
             
         except Exception as e:
@@ -94,29 +96,46 @@ class BankingToolset:
     
     def is_available(self) -> bool:
         """
-        Check if the Banking toolset is available.
+        Check if the enhanced Banking toolset is available.
         
         Returns:
-            True if tools are available and API is accessible
+            True if tools are available and APIs are accessible
         """
-        return (
-            len(self._tools) > 0 and 
-            self.api_client.is_available()
+        tools_available = len(self._tools) > 0
+        call_report_available = self.api_client.is_available()
+        
+        # Check if FDIC-enhanced bank lookup tool is available
+        bank_lookup_tool = self.get_tool_by_name("bank_lookup")
+        fdic_available = (
+            bank_lookup_tool is not None and 
+            bank_lookup_tool.is_available()
         )
+        
+        return tools_available and call_report_available and fdic_available
     
     def get_health_status(self) -> Dict[str, Any]:
         """
-        Get health status of the toolset.
+        Get health status of the enhanced toolset with FDIC integration.
         
         Returns:
             Dictionary with health status information
         """
+        # Check FDIC API availability
+        bank_lookup_tool = self.get_tool_by_name("bank_lookup")
+        fdic_available = (
+            bank_lookup_tool is not None and 
+            bank_lookup_tool.is_available()
+        )
+        
         return {
             "available": self.is_available(),
             "tools_count": len(self._tools),
             "tool_names": [tool.name for tool in self._tools],
-            "api_available": self.api_client.is_available(),
-            "toolset_type": "langchain_native"
+            "call_report_api_available": self.api_client.is_available(),
+            "fdic_api_available": fdic_available,
+            "fdic_integration": True,
+            "has_fdic_api_key": bool(self.settings.fdic_api_key),
+            "toolset_type": "langchain_native_enhanced"
         }
     
     def get_schemas(self) -> List[Dict[str, Any]]:

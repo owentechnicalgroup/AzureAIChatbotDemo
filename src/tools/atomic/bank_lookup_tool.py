@@ -1,7 +1,7 @@
 """
-LangChain-compatible Bank lookup service for mapping legal names to RSSD IDs.
+Enhanced LangChain-compatible Bank lookup service using FDIC BankFind Suite API.
 
-Provides bank identification and lookup capabilities with fuzzy matching
+Provides real-time bank identification and lookup capabilities with fuzzy matching
 to support natural language queries from AI agents, using LangChain BaseTool.
 """
 
@@ -19,144 +19,97 @@ from langchain.callbacks.manager import (
     CallbackManagerForToolRun,
 )
 
-from ..infrastructure.banking.banking_models import BankIdentification
+from src.config.settings import get_settings
+from ..infrastructure.banking.fdic_api_client import FDICAPIClient
+from ..infrastructure.banking.fdic_models import (
+    BankLookupInput,
+    FDICInstitution
+)
 
 logger = structlog.get_logger(__name__).bind(log_type="SYSTEM")
 
 
-class BankLookupInput(BaseModel):
-    """Input schema for bank lookup tool."""
-    search_term: str = Field(description="Bank name or identifier to search for (e.g., 'Wells Fargo', 'Chase', 'Bank of America')")
-    fuzzy_match: bool = Field(default=True, description="Enable fuzzy matching for approximate name matching")
-    max_results: int = Field(default=5, description="Maximum number of results to return (1-20)")
-
-
 class BankLookupTool(BaseTool):
     """
-    LangChain-compatible bank lookup tool for finding RSSD IDs from legal names.
+    Enhanced LangChain-compatible bank lookup tool using FDIC BankFind Suite API.
     
-    Provides fuzzy matching and search capabilities to help AI agents
-    identify banks from natural language queries.
+    Provides real-time bank identification with comprehensive search capabilities
+    including name, city, county, and state filters with fuzzy matching support.
     """
     
     name: str = "bank_lookup"
-    description: str = """Look up bank RSSD ID and information from bank name or identifier.
+    description: str = """Look up bank information using FDIC BankFind Suite API with real-time data.
 
-Use this tool to find banks and get their RSSD IDs before querying Call Report data.
-Supports fuzzy matching to find banks even with partial or slightly incorrect names.
+This tool searches the FDIC database for banking institutions and returns comprehensive information
+including RSSD IDs, FDIC certificate numbers, locations, and financial data.
 
-Example usage: Find Bank of America
-- search_term: "Bank of America"
-- fuzzy_match: true  
-- max_results: 5
+Enhanced Search Capabilities:
+- Institution name search with fuzzy matching
+- Location-based filtering (city, county, state)
+- Active/inactive status filtering
+- Comprehensive institution details
 
-Returns bank name, RSSD ID, location, and other identifying information."""
+Example Usage:
+
+1. Search by bank name:
+   - search_term: "Wells Fargo"
+   - fuzzy_match: true
+   - max_results: 5
+
+2. Search by location:
+   - search_term: "First National"
+   - city: "Chicago"
+   - state: "IL"
+   - max_results: 3
+
+3. Find banks in specific area:
+   - city: "New York"
+   - state: "NY"
+   - active_only: true
+   - max_results: 10
+
+4. County-based search:
+   - search_term: "Community Bank"
+   - county: "Cook County"
+   - state: "IL"
+
+Returns: Detailed bank information including name, RSSD ID, FDIC certificate number, 
+location, charter type, assets, and status for use with other banking tools."""
     
     args_schema: Type[BaseModel] = BankLookupInput
     
-    def __init__(self, **kwargs):
-        """Initialize the bank lookup tool."""
+    def __init__(self, settings=None, **kwargs):
+        """Initialize the enhanced bank lookup tool with FDIC API integration."""
         super().__init__(**kwargs)
         
-        # Load bank directory - use private attribute to avoid Pydantic conflicts
-        object.__setattr__(self, '_bank_directory', self._load_bank_directory())
+        # Get settings
+        if settings is None:
+            settings = get_settings()
+        
+        # Initialize FDIC API client - use private attribute to avoid Pydantic conflicts
+        fdic_client = FDICAPIClient(
+            api_key=settings.fdic_api_key,
+            timeout=settings.tools_timeout_seconds,
+            cache_ttl=settings.tools_cache_ttl_minutes * 60
+        )
+        object.__setattr__(self, '_fdic_client', fdic_client)
+        object.__setattr__(self, '_settings', settings)
         
         logger.info(
-            "BankLookupTool initialized",
-            banks_count=len(self._bank_directory)
+            "Enhanced BankLookupTool initialized with FDIC API",
+            has_api_key=bool(settings.fdic_api_key),
+            timeout_seconds=settings.tools_timeout_seconds
         )
     
-    @property 
-    def bank_directory(self) -> List[BankIdentification]:
-        """Get the bank directory."""
-        return getattr(self, '_bank_directory', [])
+    @property
+    def fdic_client(self) -> FDICAPIClient:
+        """Get the FDIC API client."""
+        return getattr(self, '_fdic_client')
     
-    def _load_bank_directory(self) -> List[BankIdentification]:
-        """
-        Load directory of banks with identification information.
-        
-        Returns:
-            List of BankIdentification objects for known banks
-        """
-        # Mock bank directory with realistic but fake data
-        # Using real bank names but fake/demo RSSD IDs for safety
-        banks = [
-            BankIdentification(
-                legal_name="Wells Fargo Bank, National Association",
-                rssd_id="451965",
-                fdic_cert_id="3511",
-                location="Sioux Falls, SD"
-            ),
-            BankIdentification(
-                legal_name="JPMorgan Chase Bank, National Association", 
-                rssd_id="480228",
-                fdic_cert_id="628",
-                location="Columbus, OH"
-            ),
-            BankIdentification(
-                legal_name="Bank of America, National Association",
-                rssd_id="541101", 
-                fdic_cert_id="3510",
-                location="Charlotte, NC"
-            ),
-            BankIdentification(
-                legal_name="Citibank, National Association",
-                rssd_id="628208",
-                fdic_cert_id="7213", 
-                location="Sioux Falls, SD"
-            ),
-            BankIdentification(
-                legal_name="U.S. Bank National Association",
-                rssd_id="504713",
-                fdic_cert_id="6548",
-                location="Cincinnati, OH"
-            ),
-            BankIdentification(
-                legal_name="PNC Bank, National Association",
-                rssd_id="817824",
-                fdic_cert_id="6384",
-                location="Wilmington, DE"
-            ),
-            BankIdentification(
-                legal_name="Truist Bank",
-                rssd_id="285815",
-                fdic_cert_id="5501",
-                location="Charlotte, NC"
-            ),
-            BankIdentification(
-                legal_name="Goldman Sachs Bank USA",
-                rssd_id="2182786", 
-                fdic_cert_id="33124",
-                location="Salt Lake City, UT"
-            ),
-            BankIdentification(
-                legal_name="Capital One, National Association",
-                rssd_id="112837",
-                fdic_cert_id="4297",
-                location="McLean, VA"
-            ),
-            BankIdentification(
-                legal_name="TD Bank, National Association", 
-                rssd_id="497404",
-                fdic_cert_id="18409",
-                location="Wilmington, DE"
-            ),
-            # Test/Demo banks
-            BankIdentification(
-                legal_name="Test Community Bank",
-                rssd_id="123456",
-                fdic_cert_id="12345",
-                location="Test City, TS"
-            ),
-            BankIdentification(
-                legal_name="Demo Regional Bank",
-                rssd_id="654321",
-                fdic_cert_id="54321", 
-                location="Demo Town, DT"
-            )
-        ]
-        
-        return banks
+    @property
+    def settings(self):
+        """Get the application settings."""
+        return getattr(self, '_settings')
     
     def _normalize_bank_name(self, name: str) -> str:
         """
@@ -240,60 +193,118 @@ Returns bank name, RSSD ID, location, and other identifying information."""
         
         return similarity
     
-    def _search_banks(
+    def _apply_fuzzy_matching(
         self, 
-        search_term: str, 
-        fuzzy_match: bool = True, 
-        max_results: int = 10
-    ) -> List[Dict[str, Any]]:
+        institutions: List[FDICInstitution], 
+        search_term: str
+    ) -> List[FDICInstitution]:
         """
-        Search for banks matching the search term.
+        Apply fuzzy matching to FDIC API results.
         
         Args:
-            search_term: Search query
-            fuzzy_match: Enable fuzzy matching
-            max_results: Maximum results to return
+            institutions: List of institutions from FDIC API
+            search_term: Original search term
             
         Returns:
-            List of matching banks with similarity scores
+            Filtered and sorted list based on similarity
         """
-        if not search_term.strip():
-            return []
+        if not search_term:
+            return institutions
         
-        results = []
+        scored_institutions = []
         
-        for bank in self.bank_directory:
-            # Calculate similarity score
-            similarity = self._calculate_similarity(search_term, bank.legal_name)
+        for institution in institutions:
+            similarity = self._calculate_similarity(search_term, institution.name)
             
-            # Apply threshold based on fuzzy matching setting
-            threshold = 0.3 if fuzzy_match else 0.8
-            
-            if similarity >= threshold:
-                results.append({
-                    "legal_name": bank.legal_name,
-                    "rssd_id": bank.rssd_id,
-                    "location": bank.location,
-                    "charter_type": getattr(bank, 'charter_type', 'Unknown'),
-                    "status": getattr(bank, 'status', 'Active'),
-                    "similarity_score": similarity,
-                    "match_type": "exact" if similarity >= 0.95 else "fuzzy"
-                })
+            # Keep institutions with reasonable similarity
+            if similarity >= 0.3:  # Threshold for fuzzy matching
+                # Add similarity score as temporary attribute
+                institution_dict = institution.model_dump()
+                institution_dict['similarity_score'] = similarity
+                institution_dict['match_type'] = "exact" if similarity >= 0.95 else "fuzzy"
+                scored_institutions.append((similarity, institution))
         
         # Sort by similarity score (descending)
-        results.sort(key=lambda x: x["similarity_score"], reverse=True)
+        scored_institutions.sort(key=lambda x: x[0], reverse=True)
         
-        # Return top results
-        return results[:max_results]
+        return [inst for score, inst in scored_institutions]
+    
+    def _format_results(self, institutions: List[FDICInstitution]) -> str:
+        """
+        Format FDIC institutions for tool response.
+        
+        Args:
+            institutions: List of FDIC institutions
+            
+        Returns:
+            Formatted string response
+        """
+        if not institutions:
+            return "No banks found matching the search criteria."
+        
+        response_parts = [f"Found {len(institutions)} bank(s):\n"]
+        
+        for i, institution in enumerate(institutions, 1):
+            response_parts.append(f"{i}. {institution.name}")
+            
+            if institution.rssd:
+                response_parts.append(f"   RSSD ID: {institution.rssd}")
+            
+            if institution.cert:
+                response_parts.append(f"   FDIC Certificate: {institution.cert}")
+            
+            # Build location string
+            location_parts = []
+            if institution.city:
+                location_parts.append(institution.city)
+            if institution.county and institution.county != institution.city:
+                location_parts.append(f"{institution.county} County")
+            if institution.stname:
+                location_parts.append(institution.stname)
+            elif institution.stalp:
+                location_parts.append(institution.stalp)
+            
+            if location_parts:
+                response_parts.append(f"   Location: {', '.join(location_parts)}")
+            
+            if institution.charter_type:
+                response_parts.append(f"   Charter Type: {institution.charter_type}")
+            
+            if institution.asset:
+                # Convert from thousands to readable format
+                if institution.asset >= 1000000:
+                    assets_str = f"${institution.asset/1000000:.1f}B"
+                elif institution.asset >= 1000:
+                    assets_str = f"${institution.asset/1000:.1f}M"
+                else:
+                    assets_str = f"${institution.asset}K"
+                response_parts.append(f"   Total Assets: {assets_str}")
+            
+            if institution.offices:
+                response_parts.append(f"   Offices: {institution.offices}")
+            
+            # Show status
+            status = "Active" if institution.active else "Inactive"
+            response_parts.append(f"   Status: {status}")
+            
+            response_parts.append("")  # Empty line between institutions
+        
+        response_parts.append("Use the RSSD ID or FDIC Certificate number with other banking tools for detailed financial analysis.")
+        
+        return "\n".join(response_parts)
     
     def _run(
         self,
-        search_term: str,
+        search_term: Optional[str] = None,
+        city: Optional[str] = None,
+        county: Optional[str] = None,
+        state: Optional[str] = None,
+        active_only: bool = True,
         fuzzy_match: bool = True,
         max_results: int = 5,
         run_manager: Optional[CallbackManagerForToolRun] = None,
     ) -> str:
-        """Synchronous execution."""
+        """Synchronous execution with backward compatibility."""
         try:
             # Try to get the current event loop
             loop = asyncio.get_running_loop()
@@ -303,26 +314,40 @@ Returns bank name, RSSD ID, location, and other identifying information."""
             # Create a new event loop in a thread pool
             with concurrent.futures.ThreadPoolExecutor() as executor:
                 future = executor.submit(
-                    lambda: asyncio.run(self._arun(search_term, fuzzy_match, max_results, run_manager))
+                    lambda: asyncio.run(self._arun(
+                        search_term, city, county, state, active_only, 
+                        fuzzy_match, max_results, run_manager
+                    ))
                 )
                 return future.result()
                 
         except RuntimeError:
             # No event loop running, safe to use asyncio.run
-            return asyncio.run(self._arun(search_term, fuzzy_match, max_results, run_manager))
+            return asyncio.run(self._arun(
+                search_term, city, county, state, active_only, 
+                fuzzy_match, max_results, run_manager
+            ))
     
     async def _arun(
         self,
-        search_term: str,
+        search_term: Optional[str] = None,
+        city: Optional[str] = None,
+        county: Optional[str] = None,
+        state: Optional[str] = None,
+        active_only: bool = True,
         fuzzy_match: bool = True,
         max_results: int = 5,
         run_manager: Optional[AsyncCallbackManagerForToolRun] = None,
     ) -> str:
         """
-        Execute bank lookup asynchronously.
+        Execute enhanced bank lookup with FDIC API integration.
         
         Args:
             search_term: Bank name or identifier to search for
+            city: City to filter results
+            county: County to filter results
+            state: State abbreviation to filter results  
+            active_only: Only return active institutions
             fuzzy_match: Enable fuzzy matching (default: True)
             max_results: Maximum number of results (default: 5)
             run_manager: Optional callback manager
@@ -330,77 +355,151 @@ Returns bank name, RSSD ID, location, and other identifying information."""
         Returns:
             Formatted string with search results
         """
+        start_time = datetime.now(timezone.utc)
+        
         try:
             logger.info(
-                "Executing bank lookup",
+                "Executing enhanced bank lookup with FDIC API",
                 search_term=search_term,
+                city=city,
+                county=county,
+                state=state,
+                active_only=active_only,
                 fuzzy_match=fuzzy_match,
                 max_results=max_results
             )
             
-            # Validate inputs
-            if not search_term or len(search_term.strip()) < 2:
+            # Validate inputs - at least one search criterion required
+            if not any([search_term, city, county, state]):
+                return "Error: At least one search parameter (search_term, city, county, or state) must be provided"
+            
+            # Validate search term if provided
+            if search_term and len(search_term.strip()) < 2:
                 return "Error: Search term must be at least 2 characters"
             
-            max_results = max(1, min(20, max_results))
+            # Validate and constrain max_results
+            max_results = max(1, min(50, max_results))
             
-            # Simulate some processing time
-            await asyncio.sleep(0.05 + len(search_term) * 0.001)
+            # Validate state format if provided
+            if state and len(state) != 2:
+                return "Error: State must be 2-character abbreviation (e.g., 'CA', 'TX', 'NY')"
             
-            # Search for banks
-            matches = self._search_banks(search_term, fuzzy_match, max_results)
-            
-            if not matches:
-                return f"No banks found matching '{search_term}'"
-            
-            # Format results
-            response = f"Found {len(matches)} bank(s) matching '{search_term}':\n\n"
-            
-            for i, bank in enumerate(matches[:max_results], 1):
-                response += f"{i}. {bank.get('legal_name', 'Unknown')}\n"
-                response += f"   RSSD ID: {bank.get('rssd_id', 'Unknown')}\n"
-                response += f"   Location: {bank.get('location', 'Unknown')}\n"
-                response += f"   Charter Type: {bank.get('charter_type', 'Unknown')}\n"
-                response += f"   Status: {bank.get('status', 'Unknown')}\n\n"
-            
-            response += "Use the RSSD ID with the call_report_data tool to get financial data."
-            
-            logger.info(
-                "Bank lookup completed successfully",
-                search_term=search_term,
-                matches_found=len(matches)
-            )
-            
-            return response
+            try:
+                # Call FDIC API
+                fdic_response = await self.fdic_client.search_institutions(
+                    name=search_term,
+                    city=city,
+                    county=county,
+                    state=state,
+                    active_only=active_only,
+                    limit=max_results * 2  # Get extra for fuzzy filtering
+                )
+                
+                if not fdic_response.success:
+                    error_msg = fdic_response.error_message or "Unknown error"
+                    if "server error" in error_msg.lower() or "not available" in error_msg.lower():
+                        return "Error: Bank data not available from FDIC - service temporarily unavailable. Please try again later."
+                    return f"Error: Bank search failed - {error_msg}"
+                
+                institutions = fdic_response.institutions
+                
+                if not institutions:
+                    # Build helpful error message based on search criteria
+                    criteria_parts = []
+                    if search_term:
+                        criteria_parts.append(f"name '{search_term}'")
+                    if city:
+                        criteria_parts.append(f"city '{city}'")
+                    if county:
+                        criteria_parts.append(f"county '{county}'") 
+                    if state:
+                        criteria_parts.append(f"state '{state}'")
+                    
+                    criteria_str = ", ".join(criteria_parts)
+                    return f"No banks found matching {criteria_str}. Try broader search terms or different locations."
+                
+                # Apply fuzzy matching if enabled and we have a search term
+                if fuzzy_match and search_term:
+                    institutions = self._apply_fuzzy_matching(institutions, search_term)
+                
+                # Limit results
+                institutions = institutions[:max_results]
+                
+                # Format response
+                response = self._format_results(institutions)
+                
+                execution_time = (datetime.now(timezone.utc) - start_time).total_seconds()
+                
+                logger.info(
+                    "Enhanced bank lookup completed successfully",
+                    results_found=len(institutions),
+                    execution_time=execution_time
+                )
+                
+                return response
+                
+            except Exception as api_error:
+                # Handle FDIC API specific errors
+                error_str = str(api_error)
+                logger.error(
+                    "FDIC API call failed",
+                    error=error_str,
+                    error_type=type(api_error).__name__
+                )
+                
+                if "authentication failed" in error_str.lower():
+                    return "Error: FDIC API authentication failed - check API key configuration"
+                elif "rate limit" in error_str.lower():
+                    return "Error: FDIC API rate limit exceeded - please try again in a few minutes"
+                elif "server error" in error_str.lower() or "not available" in error_str.lower():
+                    return "Error: Bank data not available from FDIC - service temporarily unavailable"
+                else:
+                    return f"Error: Bank search failed - {error_str}"
                 
         except Exception as e:
-            logger.error("Bank lookup failed", error=str(e))
-            return f"Error: Failed to lookup banks - {str(e)}"
+            execution_time = (datetime.now(timezone.utc) - start_time).total_seconds()
+            
+            logger.error(
+                "Bank lookup tool execution failed",
+                error=str(e),
+                error_type=type(e).__name__,
+                execution_time=execution_time
+            )
+            
+            return f"Error: Bank lookup failed due to unexpected error - {str(e)}"
     
-    def get_bank_by_rssd_id(self, rssd_id: str) -> Optional[BankIdentification]:
+    def get_bank_by_cert(self, cert_id: str) -> Optional[str]:
         """
-        Get bank information by RSSD ID.
+        Get bank information by FDIC certificate number.
         
         Args:
-            rssd_id: Bank's RSSD identifier
+            cert_id: FDIC certificate number
             
         Returns:
-            BankIdentification if found, None otherwise
+            Formatted bank information or None
         """
-        for bank in self.bank_directory:
-            if bank.rssd_id == rssd_id:
-                return bank
-        return None
-    
-    def get_all_banks(self) -> List[BankIdentification]:
-        """
-        Get list of all banks in the directory.
+        async def _get_by_cert():
+            try:
+                fdic_response = await self.fdic_client.get_institution_by_cert(cert_id)
+                if fdic_response.success and fdic_response.institutions:
+                    return self._format_results(fdic_response.institutions[:1])
+                return None
+            except Exception as e:
+                logger.error("Failed to get bank by cert", cert_id=cert_id, error=str(e))
+                return None
         
-        Returns:
-            List of all BankIdentification objects
-        """
-        return self.bank_directory.copy()
+        try:
+            return asyncio.run(_get_by_cert())
+        except Exception:
+            return None
+    
+    async def health_check(self) -> bool:
+        """Check if FDIC API is available."""
+        try:
+            return await self.fdic_client.health_check()
+        except Exception:
+            return False
     
     def is_available(self) -> bool:
         """Check if the bank lookup service is available."""
-        return bool(self.bank_directory)
+        return self.fdic_client.is_available()
