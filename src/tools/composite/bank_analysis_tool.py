@@ -34,50 +34,7 @@ class BankAnalysisTool(BaseTool):
     """
     
     name: str = "bank_analysis"
-    description: str = """Enhanced banking analysis tool with FDIC API integration for comprehensive financial analysis.
-
-This tool combines real-time FDIC bank identification with Call Report data to provide
-complete banking analysis workflows. Uses live FDIC data for accurate bank identification.
-
-Enhanced Search and Analysis Capabilities:
-- Real-time bank identification using FDIC BankFind Suite API
-- Location-based bank identification (city, state filtering) 
-- Multiple analysis types with financial data integration
-- Comprehensive institution details and financial metrics
-
-Analysis Types:
-- basic_info: Bank identification, location, assets, and regulatory information
-- financial_summary: Key financial metrics (assets, deposits, loans, capital ratios)  
-- key_ratios: Important financial ratios (ROA, ROE, efficiency, capital adequacy)
-
-Search Options:
-- bank_name: Institution name with fuzzy matching
-- rssd_id: Specific RSSD identifier (most precise)
-- city: Filter banks by city location
-- state: Filter banks by state (2-letter abbreviation)
-
-Example Usage:
-
-1. Basic bank analysis:
-   - bank_name: "JPMorgan Chase"
-   - query_type: "basic_info"
-
-2. Analysis with location specificity:
-   - bank_name: "First National Bank"
-   - city: "Chicago" 
-   - state: "IL"
-   - query_type: "financial_summary"
-
-3. Direct RSSD lookup:
-   - rssd_id: "451965"
-   - query_type: "key_ratios"
-
-4. Location-based discovery:
-   - city: "Charlotte"
-   - state: "NC"
-   - query_type: "basic_info"
-
-Returns: Comprehensive analysis combining FDIC institution data with Call Report financial metrics."""
+    description: str = "Analyze bank financial metrics and ratios. Calculates ROA, ROE, capital ratios, and performance metrics using Call Report data. Supports basic_info, financial_summary, and key_ratios analysis types."
     
     args_schema: Type[BaseModel] = BankAnalysisInput
     

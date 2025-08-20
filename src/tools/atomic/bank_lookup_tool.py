@@ -38,43 +38,7 @@ class BankLookupTool(BaseTool):
     """
     
     name: str = "bank_lookup"
-    description: str = """Look up bank information using FDIC BankFind Suite API with real-time data.
-
-This tool searches the FDIC database for banking institutions and returns comprehensive information
-including RSSD IDs, FDIC certificate numbers, locations, and financial data.
-
-Enhanced Search Capabilities:
-- Institution name search with fuzzy matching
-- Location-based filtering (city, county, state)
-- Active/inactive status filtering
-- Comprehensive institution details
-
-Example Usage:
-
-1. Search by bank name:
-   - search_term: "Wells Fargo"
-   - fuzzy_match: true
-   - max_results: 5
-
-2. Search by location:
-   - search_term: "First National"
-   - city: "Chicago"
-   - state: "IL"
-   - max_results: 3
-
-3. Find banks in specific area:
-   - city: "New York"
-   - state: "NY"
-   - active_only: true
-   - max_results: 10
-
-4. County-based search:
-   - search_term: "Community Bank"
-   - county: "Cook County"
-   - state: "IL"
-
-Returns: Detailed bank information including name, RSSD ID, FDIC certificate number, 
-location, charter type, assets, and status for use with other banking tools."""
+    description: str = "Find banking institutions using FDIC data. Search by name, location, or characteristics. Returns basic bank identification information including RSSD ID, certificate number, and location."
     
     args_schema: Type[BaseModel] = BankLookupInput
     

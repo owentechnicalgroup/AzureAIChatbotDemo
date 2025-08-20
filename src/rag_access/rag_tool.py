@@ -34,11 +34,7 @@ class RAGSearchTool(BaseTool):
     """
     
     name: str = "rag_search"
-    description: str = (
-        "Search through uploaded documents and retrieve formatted document context. "
-        "Use this tool when users ask questions that might be answered by uploaded documents. "
-        "The tool will search for relevant document chunks and provide formatted context for response generation."
-    )
+    description: str = "Search organizational policies, procedures, and documentation. Use for compliance requirements, guidelines, and process questions."
     args_schema: type[BaseModel] = RAGSearchInput
     
     # Use object.__setattr__ to bypass Pydantic field validation

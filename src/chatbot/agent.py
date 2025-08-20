@@ -134,59 +134,70 @@ class ChatbotAgent:
             
             multi_step_addition = f"""
 
-INTELLIGENT TOOL USAGE WITH PRECISE KNOWLEDGE CONTROL:
+INTELLIGENT DIRECT TOOL ROUTING - NO HIERARCHY:
 
 CURRENT USER SETTING: General Knowledge is {general_knowledge_status}
 
-QUERY HANDLING STRATEGY:
+QUERY TYPE RECOGNITION:
+Analyze the user's intent and route DIRECTLY to the appropriate tool. Do NOT use multiple tools unless explicitly needed for comparison.
 
-DOCUMENT-ORIENTED QUERIES (always start with rag_search):
-• ALWAYS use rag_search(use_general_knowledge={self.use_general_knowledge}) first for any user query
-• CRITICAL DOCUMENT HANDLING RULES:
-  1. ONLY use information from the documents provided in the context
-  2. NEVER use your general knowledge or training data for document queries
-  3. If the documents don't contain relevant information, do not quote as sources
-  4. Stay strictly within the bounds of the provided documents
-• Always include a "Sources used:" section listing the documents referenced
-• Return rag_search results exactly as provided (includes proper source citations)
+🏛️ BANK POLICIES & PROCESSES → rag_search
+Intent: User asking about organizational policies, procedures, compliance, documentation
+Keywords: "policy", "procedure", "compliance", "requirements", "documentation", "guidelines", "standards", "regulations", "process", "how to", "what does the document say"
+Examples:
+- "What are the compliance requirements for..."
+- "Show me the procedure for loan approval"
+- "What does the policy say about risk management"
+- "According to our documentation..."
+Action: rag_search(use_general_knowledge={self.use_general_knowledge})
 
-BANKING-SPECIFIC QUERIES (intelligent routing):
-• Examples: "Find Wells Fargo", "What are JPMorgan's assets?", "Look up Chase information"
-• First try rag_search for document content about the bank
-• If documents insufficient, then use banking tools: bank_lookup, call_report_data, bank_analysis
-• Banking tools are ALWAYS allowed regardless of General Knowledge setting (they provide factual data)
+🔍 BANK INFORMATION & IDENTIFICATION → bank_lookup
+Intent: User wants to find or identify specific banks, bank locations, or basic bank details
+Keywords: "find", "locate", "search for", "banks in", "what banks", "which banks", "bank information", specific bank names, "RSSD", "certificate"
+Examples:
+- "Find Wells Fargo"
+- "What banks are in Chicago?"
+- "Banks in Texas with 'Community' in the name"
+- "Get me JPMorgan's RSSD ID"
+Action: bank_lookup() with appropriate search parameters
 
-MIXED QUERIES (sequential approach):
-• Example: "Compare document requirements with Wells Fargo's ratios"
-• Step 1: rag_search for document content
-• Step 2: banking tools for live financial data
-• Step 3: Synthesize with clear source attribution
+📊 FINANCIAL CALCULATIONS & ANALYSIS → bank_analysis
+Intent: User wants financial metrics, ratios, calculations, or performance analysis
+Keywords: "calculate", "ratio", "ROA", "ROE", "capital", "assets", "performance", "financial", "metrics", "compare", "analyze", "what is [bank]'s", "how much"
+Examples:
+- "Calculate Wells Fargo's ROA"
+- "What is JPMorgan's capital ratio?"
+- "Analyze Bank of America's financial performance"
+- "Compare Citibank's assets to deposits"
+Action: bank_analysis() with appropriate query_type
 
-GENERAL KNOWLEDGE SCOPE CONTROL:
-• ENABLED ({self.use_general_knowledge}): rag_search can supplement documents with general AI knowledge
-• DISABLED ({not self.use_general_knowledge}): rag_search provides ONLY document-based responses, no general knowledge
-• Banking tools: Always provide factual financial data regardless of knowledge setting
-• Other factual tools: Always allowed for specific data retrieval"""
+MULTI-TOOL SCENARIOS (Only when explicitly needed):
+- COMPARISON queries: "Compare document policy with Wells Fargo's ratios"
+  → rag_search THEN bank_analysis
+- POLICY + DATA: "What does our lending policy say about institutions like JPMorgan?"
+  → rag_search THEN bank_lookup for context
+
+PERFORMANCE OPTIMIZATION:
+• Route to the SINGLE most appropriate tool first
+• Only use multiple tools when comparison is explicitly requested
+• Prefer simpler tools for basic information requests
+• Banking tools provide factual data regardless of General Knowledge setting"""
             
             # Add strict enforcement rules only when general knowledge is disabled
             if not self.use_general_knowledge:
                 strict_enforcement = """
 
-STRICT ENFORCEMENT - DOCUMENT-ONLY MODE:
-⚠️  CRITICAL RESTRICTIONS WHEN GENERAL KNOWLEDGE IS DISABLED:
-• DO NOT use any information from your training data about banking, finance, regulations, or Federal Reserve
-• DO NOT reference "Federal Reserve Bank reporting manuals", "banking regulations", or "standard practices" unless they appear in the actual document search results
-• DO NOT explain banking concepts, FFIEC requirements, or regulatory procedures unless explicitly found in retrieved documents
-• If document search results are insufficient or empty, you MUST respond: "I don't have enough information in the available documents to answer this question."
-• NEVER use phrases like "based on general banking knowledge", "typically in banking", "standard practice", or "according to regulations"
-• ONLY use information that comes directly from the rag_search tool results or banking data tools (bank_lookup, call_report_data)
-• When combining document and tool data, clearly distinguish: "According to the documents..." vs "According to the call report data..."
-• If no documents are found but banking tools have data, clearly state: "While I don't have document information about this, the banking data shows..."
+DOCUMENT-ONLY MODE ENFORCEMENT:
+⚠️  When General Knowledge is DISABLED:
+• rag_search: Returns ONLY document-based information, no general knowledge supplementation
+• Banking tools: Always allowed for factual data (bank_lookup, bank_analysis)
+• If rag_search finds no documents: "I don't have information about this in the available documents."
+• Clearly distinguish sources: "According to the documents..." vs "According to the banking data..."
 
-COMPLIANCE CHECK - Before responding, ask yourself:
-1. Did this information come from rag_search results or banking tools?
-2. Am I drawing from my general knowledge about banking/finance?
-3. If documents are insufficient, did I say so clearly?"""
+COMPLIANCE CHECK:
+1. Did information come from rag_search results or banking tools?
+2. If using general knowledge, is General Knowledge enabled?
+3. Are sources clearly identified?"""
                 multi_step_addition += strict_enforcement
             
             multi_step_addition += f"""
@@ -197,77 +208,20 @@ CRITICAL SOURCE CITATION RULES:
 • Mixed responses: Clearly distinguish document sources vs tool-provided data
 • Never fabricate sources - only cite actual tools used and data retrieved
 
-EXAMPLE BEHAVIORS:
-Query: "What is Wells Fargo?" with General Knowledge DISABLED
-→ 1. rag_search first (documents only, no general knowledge)
-→ 2. If insufficient, use bank_lookup (factual banking data always allowed)
-
-Query: "What does the document say about compliance?" 
-→ rag_search only (respects General Knowledge setting for supplementation)
+DIRECT ROUTING EXAMPLES:
+• "Find Wells Fargo" → bank_lookup (direct bank identification)
+• "What does the policy say about compliance?" → rag_search (document content)
+• "Calculate JPMorgan's ROA" → bank_analysis (financial calculations)
+• "Banks in Chicago" → bank_lookup (location search)
 
 Available tools:
 {tools_text}
 
-Remember: rag_search has specialized internal prompting for document handling and knowledge control. Banking tools provide factual data and are always permitted.
-
-RESPONSE FORMATTING REQUIREMENTS:
-
-OUTPUT FORMAT:
-• Use proper markdown formatting for all responses
-• Structure responses with clear headings using ## and ###
-• Use **bold** for emphasis and important values
-• Use bullet points (-) or numbered lists for organized information
-• Format calculations with proper markdown code blocks using ```
-
-MATHEMATICAL EXPRESSIONS:
-• Present calculations in structured format:
-  - Given values as bullet points
-  - Formula in code block
-  - Step-by-step calculation in code block
-  - Final result emphasized with **bold**
-
-FINANCIAL DATA PRESENTATION:
-• Format currency with $ symbols and proper thousands separators
-• Present ratios as percentages with % symbol
-• Group related financial metrics together
-• Use tables for multiple data points when appropriate
-
-SOURCE CITATIONS:
-• Always end responses with a "## Sources" section
-• List each source as a bullet point with clear identification
-• Include RSSD IDs for banking data
-• Specify document names for RAG sources
-• Use consistent citation format
-
-EXAMPLE STRUCTURE:
-```markdown
-## Analysis Results
-
-**Key Findings:**
-- Finding 1
-- Finding 2
-
-### Calculations
-**Given Values:**
-- Value 1: $123,456
-- Value 2: $789,012
-
-**Formula:**
-```
-Ratio = (Value 1 / Value 2) × 100
-```
-
-**Calculation:**
-```
-= (123,456 / 789,012) × 100 = 15.65%
-```
-
-**Result:** The ratio is **15.65%**
-
-## Sources
-- FFIEC Call Report data (RSSD ID: 123456)
-- Document Name.pdf (specific section)
-```"""
+PERFORMANCE PRINCIPLES:
+• Choose the SINGLE most appropriate tool for each query
+• Avoid multi-tool usage unless comparison is explicitly requested
+• Use concise, well-structured responses with proper source citations
+• Include "## Sources" section listing tools used and data sources"""
             
             return base_prompt + multi_step_addition
         
