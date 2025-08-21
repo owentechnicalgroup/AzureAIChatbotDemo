@@ -171,7 +171,7 @@ def _classify_tool_by_name(tool_name: str) -> ToolCategory:
         return ToolCategory.DOCUMENTS
     
     # Banking tools
-    if any(keyword in name_lower for keyword in ['bank', 'call_report', 'financial', 'rssd']):
+    if any(keyword in name_lower for keyword in ['bank', 'call_report', 'financial', 'rssd', 'fdic']):
         return ToolCategory.BANKING
     
     # Analysis tools  

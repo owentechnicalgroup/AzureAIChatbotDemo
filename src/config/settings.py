@@ -455,7 +455,23 @@ class Settings(BaseSettings):
     fdic_api_key: Optional[str] = Field(
         None,
         env='FDIC_API_KEY',
-        description="FDIC BankFind Suite API key for bank institution data"
+        description="FDIC BankFind Suite API key for bank institution and financial data"
+    )
+    
+    # FDIC Financial API Configuration
+    fdic_financial_api_timeout: float = Field(
+        30.0,
+        ge=5.0,
+        le=300.0,
+        env='FDIC_FINANCIAL_API_TIMEOUT',
+        description="FDIC Financial API request timeout in seconds"
+    )
+    fdic_financial_cache_ttl: int = Field(
+        1800,
+        ge=300,
+        le=7200,
+        env='FDIC_FINANCIAL_CACHE_TTL',
+        description="FDIC Financial API cache TTL in seconds (5 min to 2 hours)"
     )
     
     # Feature Flags

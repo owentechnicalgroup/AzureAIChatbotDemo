@@ -1,9 +1,30 @@
 """
-Enhanced LangChain-compatible Bank lookup service using FDIC BankFind Suite API.
+DEPRECATED: Enhanced LangChain-compatible Bank lookup service using FDIC BankFind Suite API.
+
+⚠️  DEPRECATED: This tool has been replaced by clean atomic FDIC tools:
+   - fdic_institution_search_tool.py (for institution discovery)
+   - fdic_financial_data_tool.py (for financial data retrieval)
+
+Issues with this implementation:
+- Misnamed (does search, not lookup)
+- Uses regex without import (crashes)
+- Returns text instead of structured data
+- Overly complex fuzzy matching
+- Mixed search + formatting concerns
+
+Please use the new atomic tools for better reliability and tool graph compatibility.
 
 Provides real-time bank identification and lookup capabilities with fuzzy matching
 to support natural language queries from AI agents, using LangChain BaseTool.
 """
+
+import warnings
+
+warnings.warn(
+    "BankLookupTool is deprecated. Use FDICInstitutionSearchTool and FDICFinancialDataTool instead.",
+    DeprecationWarning,
+    stacklevel=2
+)
 
 import asyncio
 from datetime import datetime, timezone
