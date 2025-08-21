@@ -66,9 +66,9 @@ class ServiceAvailabilityChecker:
         """
         return {
             "chromadb": self._check_chromadb_availability,
-            "call_report_api": self._check_call_report_api_availability,
             "web_search_api": self._check_web_search_api_availability,
             "fdic_api": self._check_fdic_api_availability,
+            "fdic_financial_api": self._check_fdic_financial_api_availability,
         }
     
     async def check_service_availability(self, service_name: str) -> bool:
@@ -187,34 +187,6 @@ class ServiceAvailabilityChecker:
             self.logger.warning("ChromaDB check failed", error=str(e))
             return False
     
-    async def _check_call_report_api_availability(self) -> bool:
-        """
-        Check Call Report API availability.
-        
-        Follows the existing pattern in call_report tools.
-        """
-        try:
-            from .infrastructure.banking.call_report_api import CallReportMockAPI
-            
-            # Initialize mock API client
-            api_client = CallReportMockAPI()
-            
-            # Check if API is available
-            is_available = api_client.is_available()
-            
-            self.logger.debug(
-                "Call Report API availability check",
-                available=is_available
-            )
-            
-            return is_available
-            
-        except ImportError as e:
-            self.logger.warning("Call Report API not available", error=str(e))
-            return False
-        except Exception as e:
-            self.logger.warning("Call Report API check failed", error=str(e))
-            return False
     
     async def _check_web_search_api_availability(self) -> bool:
         """
@@ -264,6 +236,53 @@ class ServiceAvailabilityChecker:
         except Exception as e:
             self.logger.warning(
                 "FDIC API availability check failed",
+                error=str(e),
+                error_type=type(e).__name__
+            )
+            return False
+    
+    async def _check_fdic_financial_api_availability(self) -> bool:
+        """
+        Check FDIC BankFind Suite Financial Data API availability.
+        
+        Returns:
+            True if FDIC Financial API is accessible and responding
+        """
+        try:
+            # Import FDIC Financial API client here to avoid circular imports
+            from .infrastructure.banking.fdic_financial_api import FDICFinancialAPI
+            
+            # Initialize client with settings
+            client = FDICFinancialAPI(
+                api_key=self.settings.fdic_api_key,
+                timeout=self.settings.fdic_financial_api_timeout,
+                cache_ttl=self.settings.fdic_financial_cache_ttl
+            )
+            
+            # Check if client is properly configured
+            if not client.is_available():
+                self.logger.debug("FDIC Financial API client not properly configured")
+                return False
+            
+            # Perform health check
+            health_check_result = await client.health_check()
+            
+            self.logger.debug(
+                "FDIC Financial API availability check completed",
+                available=health_check_result,
+                has_api_key=bool(self.settings.fdic_api_key),
+                timeout=self.settings.fdic_financial_api_timeout,
+                cache_ttl=self.settings.fdic_financial_cache_ttl
+            )
+            
+            return health_check_result
+            
+        except ImportError:
+            self.logger.warning("FDIC Financial API client not available - missing dependencies")
+            return False
+        except Exception as e:
+            self.logger.warning(
+                "FDIC Financial API availability check failed",
                 error=str(e),
                 error_type=type(e).__name__
             )
@@ -447,16 +466,16 @@ class DynamicToolLoader:
         return tools
     
     async def _load_banking_tools(self) -> List[BaseTool]:
-        """Load banking category tools (Call Report, financial analysis)."""
+        """Load modern FDIC Financial API banking tools."""
         tools = []
         
-        # Load Banking tools if API is available
-        if "call_report_api" in self._available_services:
+        # Load Banking tools if FDIC APIs are available
+        if "fdic_api" in self._available_services or "fdic_financial_api" in self._available_services:
             try:
                 from .infrastructure.toolsets.banking_toolset import BankingToolset
                 from .categories import add_category_metadata, ToolCategory
                 
-                # Initialize LangChain-native Banking toolset
+                # Initialize modern FDIC Financial API banking toolset
                 banking_toolset = BankingToolset(self.settings)
                 langchain_tools = banking_toolset.get_tools()
                 
@@ -471,25 +490,32 @@ class DynamicToolLoader:
                         )
                         continue
                     
-                    # Add banking category metadata
+                    # Add banking category metadata for FDIC tools
+                    required_services = []
+                    if "fdic_api" in self._available_services:
+                        required_services.append("fdic_api")
+                    if "fdic_financial_api" in self._available_services:
+                        required_services.append("fdic_financial_api")
+                    
                     tool = add_category_metadata(
                         tool,
                         category=ToolCategory.BANKING,
-                        requires_services=["call_report_api"],
+                        requires_services=required_services,
                         priority=5,
-                        tags=["banking", "financial", "call_report"]
+                        tags=["banking", "financial", "fdic", "regulatory"]
                     )
                     
                     tools.append(tool)
                 
                 self.logger.info(
-                    "LangChain Banking tools loaded successfully",
+                    "Modern FDIC Financial API banking tools loaded successfully",
                     tool_count=len(tools),
-                    tool_names=[tool.name for tool in tools]
+                    tool_names=[tool.name for tool in tools],
+                    available_services=list(self._available_services)
                 )
                 
             except Exception as e:
-                self.logger.error("Failed to load LangChain Banking tools", error=str(e))
+                self.logger.error("Failed to load FDIC Financial API banking tools", error=str(e))
         
         return tools
     

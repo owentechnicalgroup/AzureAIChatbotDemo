@@ -332,7 +332,7 @@ Ratio = (Value 1 / Value 2) × 100
             memory=memory,
             verbose=False,  # Disable verbose to avoid callback issues
             max_iterations=5,  # Prevent infinite loops
-            early_stopping_method="generate",
+            early_stopping_method="force",  # Updated to supported value (was "generate")
             handle_parsing_errors=True
         )
         

@@ -1,0 +1,28 @@
+## FEATURE:
+
+- The goal of this feature is to add a new tool that will allow the AI Agent to lookup Financial Information about a bank using the FDIC RISView API. This is the /banks/fincancials node documented in the API
+- The FDIC RISView provides types of data, Instiution Identifiers, Financial Metrics, Classifications Flags and Regulatory and Statistical Code.
+- You should instruct the agent to use the FDIC RISView API when:
+- You need current or historical financial metrics for a bank or group of banks.
+- You are analyzing total assets, domestic deposits, or capital ratios.
+- You are evaluating community bank status, multi-state operations, or branch presence.
+- You are comparing institutions based on deposit concentration, liquidity, or geographic footprint.
+- You are conducting regional or metro-level analysis using CBSA codes or names.
+- You should instruct the agent to not use the FDIC RISView API when:
+- Tracking institutional changes like mergers, closures, or name changes (use the FDIC History API instead).
+- Retrieving consumer complaint data or enforcement actions (use appropriate CFPB or OCC sources).
+- The API should use the API Key used by the other FDIC search.
+- Enhance the bank_analysis_tool to use data from the FDIC RISView API instead of MOC data from the call_report_data_tool.
+- Keep the call_report_data_tool, but remove it from the bank_analysis_tool
+
+## Examples:
+
+- See application source for example tool implementation /tools/atomic/bank_lookup_tool.py
+- /tools/composite/bank_analysis_tool.py
+- /tools/dynamic.loader.py
+
+## Documentation
+
+- FDIC Website for BankFindSuite API https://api.fdic.gov/banks/docs/#/
+- Full API documentation https://api.fdic.gov/banks/docs/swagger.yaml
+- API Specification - https://api.fdic.gov/banks/docs/risview_properties.yaml
