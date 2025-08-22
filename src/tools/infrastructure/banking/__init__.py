@@ -1,15 +1,14 @@
 """
 Banking infrastructure components.
 
-Models, constants, and API clients for banking-related tools.
+API clients and data models for FDIC Financial Data integration.
 """
 
-from .banking_models import BankIdentification
-from .call_report_api import CallReportMockAPI
-from .banking_constants import CALL_REPORT_FIELDS
+# This module provides FDIC API clients and models:
+# - fdic_api_client.py: FDIC BankFind Suite API client
+# - fdic_financial_api.py: FDIC Financial Data API client
+# - fdic_models.py: Institution data models
+# - fdic_financial_models.py: Financial data models
+# - fdic_*_constants.py: Constants and field mappings
 
-__all__ = [
-    "BankIdentification",
-    "CallReportMockAPI", 
-    "CALL_REPORT_FIELDS"
-]
+__all__ = []

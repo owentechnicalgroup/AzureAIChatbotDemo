@@ -2,13 +2,13 @@
 Tools module - organized by atomic, composite, and infrastructure components.
 
 This module provides a clean organization of LangChain tools:
-- atomic: Single-purpose, focused tools
+- atomic: Single-purpose, focused tools (FDIC API, RAG search)
 - composite: Multi-step workflow orchestration tools  
 - infrastructure: Supporting services, data models, and tool collections
 """
 
-# Import organized tool collections
-from .atomic import BankLookupTool, CallReportDataTool, RAGSearchTool
+# Import production tool collections
+from .atomic import FDICInstitutionSearchTool, FDICFinancialDataTool, RAGSearchTool
 from .composite import BankAnalysisTool
 from .infrastructure.toolsets import BankingToolset
 
@@ -22,9 +22,9 @@ from .categories import (
 from .dynamic_loader import DynamicToolLoader, ServiceAvailabilityChecker
 
 __all__ = [
-    # Atomic tools
-    "BankLookupTool",
-    "CallReportDataTool", 
+    # Atomic tools - Production
+    "FDICInstitutionSearchTool",
+    "FDICFinancialDataTool", 
     "RAGSearchTool",
     
     # Composite tools

@@ -1,18 +1,22 @@
 # PRP: FDIC BankFind Suite API Integration
 
 ## Goal
+
 Enhance the existing `bank_lookup_tool` and `bank_analysis_tool` to use the FDIC BankFind Suite API for real-time bank identification and data retrieval, replacing the current mock data with live FDIC institution data.
 
 ## Why
+
 - **Real Data**: Replace mock bank data with authoritative FDIC institution information
-- **Comprehensive Search**: Enable search by institution name, city, and county 
+- **Comprehensive Search**: Enable search by institution name, city, and county
 - **Enhanced Accuracy**: Provide real FDIC certificate numbers, RSSD IDs, and institution details
 - **Future Extensibility**: Foundation for incorporating additional FDIC APIs (Financial, Demographics, etc.)
 
 ## What
+
 Transform the banking tools to integrate with FDIC's BankFind Suite API while maintaining LangChain compatibility and existing tool patterns.
 
 ### Success Criteria
+
 - [ ] Bank lookup searches real FDIC data via API
 - [ ] Support for name, city, county search parameters
 - [ ] Enhanced input schemas reflecting FDIC fields
@@ -24,33 +28,35 @@ Transform the banking tools to integrate with FDIC's BankFind Suite API while ma
 ## All Needed Context
 
 ### Documentation & References
+
 ```yaml
 - url: https://api.fdic.gov/banks/docs/
   why: Primary FDIC BankFind Suite API documentation and examples
-  
-- url: https://api.fdic.gov/banks/docs/swagger.yaml  
+
+- url: https://api.fdic.gov/banks/docs/swagger.yaml
   why: Complete API schema with endpoints, parameters, and response formats
-  
+
 - file: src/tools/atomic/bank_lookup_tool.py
   why: Current implementation pattern, LangChain integration, async patterns
-  
+
 - file: src/tools/composite/bank_analysis_tool.py
   why: How composite tools use atomic tools, workflow patterns
-  
+
 - file: src/tools/infrastructure/banking/call_report_api.py
   why: API client patterns, error handling, async execution
-  
+
 - file: src/config/settings.py
   why: Secure API key storage patterns, field validation, environment setup
-  
-- file: src/tools/dynamic_loader.py  
+
+- file: src/tools/dynamic_loader.py
   why: Service availability checking patterns, tool loading logic
-  
+
 - file: tests/tools/call_report/test_langchain_tools.py
   why: Testing patterns for LangChain tools, mocking strategies
 ```
 
 ### Current Codebase Structure
+
 ```bash
 src/
 ├── tools/
@@ -77,6 +83,7 @@ src/
 ```
 
 ### Desired Codebase Structure (New Files)
+
 ```bash
 src/tools/infrastructure/banking/
 ├── fdic_api_client.py           # New FDIC API client
@@ -86,11 +93,12 @@ src/tools/infrastructure/banking/
 tests/tools/fdic/
 ├── __init__.py
 ├── test_fdic_api_client.py     # FDIC client tests
-├── test_fdic_models.py         # FDIC model tests  
+├── test_fdic_models.py         # FDIC model tests
 └── test_enhanced_bank_tools.py # Enhanced tool tests
 ```
 
 ### Known Gotchas & Library Quirks
+
 ```python
 # CRITICAL: FDIC API uses Elasticsearch query syntax
 # Search: NAME:"First Bank" (exact phrase)
@@ -136,11 +144,12 @@ tests/tools/fdic/
 ## Implementation Blueprint
 
 ### Data Models and Structure
+
 ```python
 # FDIC Institution model with key fields
 class FDICInstitution(BaseModel):
     cert: Optional[str]          # FDIC Certificate number
-    name: str                    # Institution name  
+    name: str                    # Institution name
     rssd: Optional[str]          # RSSD ID (Federal Reserve)
     city: Optional[str]          # City
     county: Optional[str]        # County
@@ -155,7 +164,7 @@ class FDICInstitution(BaseModel):
 class BankLookupInput(BaseModel):
     search_term: Optional[str] = Field(description="Bank name to search")
     city: Optional[str] = Field(description="City to filter results")
-    county: Optional[str] = Field(description="County to filter results") 
+    county: Optional[str] = Field(description="County to filter results")
     state: Optional[str] = Field(description="State abbreviation (e.g., 'CA', 'TX')")
     active_only: bool = Field(default=True, description="Only show active institutions")
     max_results: int = Field(default=5, description="Maximum results (1-50)")
@@ -176,7 +185,7 @@ CREATE src/tools/infrastructure/banking/fdic_constants.py:
   - ADD search query templates
 
 CREATE src/tools/infrastructure/banking/fdic_api_client.py:
-  - MIRROR pattern from: call_report_api.py  
+  - MIRROR pattern from: call_report_api.py
   - IMPLEMENT async HTTP client using aiohttp (standardized choice)
   - ADD search_institutions() method with response caching
   - INCLUDE FDIC-specific error handling (400, 401, 429, 500)
@@ -190,11 +199,11 @@ MODIFY src/config/settings.py:
   - ADD: fdic_api_key field with proper Field() description
   - PRESERVE: existing security patterns for API keys
 
-Task 3: Enhance Bank Lookup Tool  
+Task 3: Enhance Bank Lookup Tool
 MODIFY src/tools/atomic/bank_lookup_tool.py:
   - REPLACE: mock data loading with FDIC API client
   - UPDATE: input schema to enhanced BankLookupInput
-  - ENHANCE: search logic to support city/county/state filters  
+`  - ENHANCE: search logic to support city/county/state filters
   - UPDATE: tool description with new capabilities and examples
   - PRESERVE: existing LangChain BaseTool interface
   - MAINTAIN: fuzzy matching and similarity scoring
@@ -228,6 +237,7 @@ MODIFY src/tools/infrastructure/toolsets/banking_toolset.py:
 ```
 
 ### Task 1 Pseudocode - FDIC API Client
+
 ```python
 # src/tools/infrastructure/banking/fdic_api_client.py
 class FDICAPIClient:
@@ -235,11 +245,11 @@ class FDICAPIClient:
         self.api_key = api_key
         self.base_url = "https://api.fdic.gov"
         self.timeout = aiohttp.ClientTimeout(total=timeout)
-    
+
     async def search_institutions(
-        self, 
+        self,
         name: Optional[str] = None,
-        city: Optional[str] = None, 
+        city: Optional[str] = None,
         county: Optional[str] = None,
         state: Optional[str] = None,
         active_only: bool = True,
@@ -249,7 +259,7 @@ class FDICAPIClient:
         search_parts = []
         if name:
             search_parts.append(f'NAME:"{name}"')
-        
+
         filters = []
         if city:
             filters.append(f'CITY:"{city}"')
@@ -257,7 +267,7 @@ class FDICAPIClient:
             filters.append(f'STALP:{state}')
         if active_only:
             filters.append('ACTIVE:1')
-            
+
         # CRITICAL: Use proper query syntax for FDIC API
         query_params = {
             'search': ' '.join(search_parts) if search_parts else None,
@@ -265,39 +275,23 @@ class FDICAPIClient:
             'limit': limit,
             'format': 'json'
         }
-        
+
         # GOTCHA: Add API key if provided
         if self.api_key:
             query_params['api_key'] = self.api_key
-            
-        # PATTERN: Async HTTP with proper error handling using aiohttp
+
+        # PATTERN: Async HTTP with proper error handling
         async with aiohttp.ClientSession(timeout=self.timeout) as session:
-            async with session.get(f"{self.base_url}/institutions", 
+            async with session.get(f"{self.base_url}/institutions",
                                  params=query_params) as response:
-                # CRITICAL: FDIC-specific error handling
-                if response.status == 400:
-                    raise ValueError("Invalid FDIC API request parameters")
-                elif response.status == 401:
-                    raise ValueError("FDIC API authentication failed") 
-                elif response.status == 429:
-                    raise ValueError("FDIC API rate limit exceeded")
-                elif response.status >= 500:
-                    raise ValueError("FDIC API server error - bank data not available")
-                
+                # CRITICAL: Handle FDIC-specific error responses
                 response.raise_for_status()
                 data = await response.json()
-                
-                # CRITICAL: Validate response data against schema
-                validated_response = FDICAPIResponse.model_validate(data)
-                
-                # CRITICAL: Cache successful responses
-                cache_key = f"fdic_search_{hash(str(query_params))}"
-                self._cache_response(cache_key, validated_response)
-                
-                return validated_response
+                return FDICAPIResponse.parse_obj(data)
 ```
 
 ### Task 3 Pseudocode - Enhanced Bank Lookup
+
 ```python
 # Enhanced _run method in bank_lookup_tool.py
 async def _arun(
@@ -313,45 +307,44 @@ async def _arun(
     # PATTERN: Validate inputs first
     if not any([search_term, city, county, state]):
         return "Error: At least one search parameter required"
-    
+
     # CRITICAL: Use FDIC API client instead of mock data
     try:
         api_response = await self.fdic_client.search_institutions(
             name=search_term,
             city=city,
-            county=county, 
+            county=county,
             state=state,
             active_only=active_only,
             limit=max_results * 2  # Get extra for fuzzy filtering
         )
-        
+
         institutions = api_response.institutions
-        
+
         # PRESERVE: Existing fuzzy matching logic for backwards compatibility
         if fuzzy_match and search_term:
             institutions = self._apply_fuzzy_matching(institutions, search_term)
-            
+
         # PATTERN: Format response like existing implementation
         return self._format_results(institutions[:max_results])
-        
+
     except Exception as e:
         self.logger.error("FDIC API search failed", error=str(e))
-        # CRITICAL: No fallback to mock data - return clear error
-        if "server error" in str(e).lower():
-            return "Error: Bank data not available from FDIC - service temporarily unavailable"
+        # FALLBACK: Could fall back to mock data or return error
         return f"Error: Bank search failed - {str(e)}"
 ```
 
 ### Integration Points
+
 ```yaml
 SETTINGS:
   - add to: src/config/settings.py
   - field: fdic_api_key with proper security handling
-  
+
 SERVICE_AVAILABILITY:
   - add to: src/tools/dynamic_loader.py
   - checker: _check_fdic_api_availability method
-  
+
 TOOL_REGISTRATION:
   - update: src/tools/infrastructure/toolsets/banking_toolset.py
   - preserve: existing LangChain patterns
@@ -359,7 +352,8 @@ TOOL_REGISTRATION:
 
 ## Validation Loop
 
-### Level 1: Syntax & Style  
+### Level 1: Syntax & Style
+
 ```bash
 # Run these FIRST - fix any errors before proceeding
 cd src/tools/infrastructure/banking/
@@ -374,102 +368,84 @@ mypy bank_lookup_tool.py
 ```
 
 ### Level 2: Unit Tests
+
 ```python
 # tests/tools/fdic/test_fdic_api_client.py
 import pytest
-from aioresponses import aioresponses
+from unittest.mock import AsyncMock, Mock
 from src.tools.infrastructure.banking.fdic_api_client import FDICAPIClient
 
 @pytest.mark.asyncio
 async def test_search_institutions_by_name():
     """Test basic institution search by name"""
     client = FDICAPIClient("test_api_key")
-    
+
     # Mock successful API response
     mock_response = {
         "institutions": [
             {
                 "cert": "123",
-                "name": "Test Bank", 
+                "name": "Test Bank",
                 "city": "Test City",
                 "stname": "California",
                 "active": True
             }
         ]
     }
-    
-    # Mock HTTP responses directly using aioresponses
-    with aioresponses() as mock_http:
-        mock_http.get(
-            'https://api.fdic.gov/institutions',
-            payload=mock_response,
-            status=200
-        )
-        
+
+    with patch('aiohttp.ClientSession') as mock_session:
+        mock_session.return_value.__aenter__.return_value.get.return_value.__aenter__.return_value.json.return_value = mock_response
+
         result = await client.search_institutions(name="Test Bank")
-        
+
         assert result.institutions[0].name == "Test Bank"
         assert result.institutions[0].cert == "123"
 
 @pytest.mark.asyncio
-async def test_fdic_api_error_handling():
-    """Test FDIC-specific error handling"""
-    client = FDICAPIClient("test_api_key")
-    
-    # Test 429 rate limit error
-    with aioresponses() as mock_http:
-        mock_http.get(
-            'https://api.fdic.gov/institutions',
-            status=429
-        )
-        
-        with pytest.raises(ValueError, match="rate limit exceeded"):
-            await client.search_institutions(name="Test Bank")
-
-@pytest.mark.asyncio  
 async def test_enhanced_bank_lookup_tool():
     """Test enhanced bank lookup with FDIC integration"""
     from src.tools.atomic.bank_lookup_tool import BankLookupTool
-    
+
     tool = BankLookupTool()
-    
+
     result = await tool._arun(
         search_term="Wells Fargo",
-        state="CA", 
+        state="CA",
         max_results=3
     )
-    
+
     assert "Found" in result
     assert "Wells Fargo" in result or "No banks found" in result
 
 def test_backward_compatibility():
-    """Ensure existing tool interface still works"""  
+    """Ensure existing tool interface still works"""
     from src.tools.atomic.bank_lookup_tool import BankLookupInput
-    
+
     # Old interface should still work
     old_input = BankLookupInput(
         search_term="Bank of America",
         fuzzy_match=True,
         max_results=5
     )
-    
+
     assert old_input.search_term == "Bank of America"
     assert old_input.fuzzy_match == True
 ```
 
 ```bash
-# Install aioresponses for HTTP mocking if needed
-uv add --dev aioresponses
-
 # Run and iterate until passing:
 cd tests/tools/fdic/
 uv run pytest test_fdic_api_client.py -v
 uv run pytest test_enhanced_bank_tools.py -v
 
+# Test backward compatibility
+uv run pytest ../call_report/ -k "test_bank" -v
+
 # If failing: Read error, fix code, re-run (don't mock to pass - fix the implementation)
 ```
 
 ### Level 3: Integration Test
+
 ```bash
 # Test with actual FDIC API (if key configured)
 uv run python -c "
@@ -489,6 +465,7 @@ asyncio.run(test())
 ```
 
 ## Final Validation Checklist
+
 - [ ] All tests pass: `uv run pytest tests/tools/ -v`
 - [ ] No linting errors: `ruff check src/tools/ --fix`
 - [ ] No type errors: `mypy src/tools/`
@@ -500,8 +477,9 @@ asyncio.run(test())
 - [ ] Logs informative: Structured logging for debugging
 
 ## Anti-Patterns to Avoid
+
 - ❌ Don't hardcode the API key - use settings pattern
-- ❌ Don't break backward compatibility - existing interfaces must work  
+- ❌ Don't break backward compatibility - existing interfaces must work
 - ❌ Don't ignore FDIC API rate limits or error responses
 - ❌ Don't use sync HTTP calls - maintain async patterns
 - ❌ Don't skip comprehensive tool descriptions - AI needs good prompts
@@ -510,16 +488,8 @@ asyncio.run(test())
 
 ---
 
-## Confidence Score: 9.5/10
+## Confidence Score: 8/10
 
-**Strong points**: 
-- Comprehensive context with FDIC API documentation and existing patterns
-- Clear technical decisions: aiohttp, direct HTTP mocking, response caching
-- Specific error handling for FDIC status codes (400, 401, 429, 500)
-- No fallback complexity - clear error messages when FDIC unavailable
-- Data validation and field mapping patterns established
-- Executable validation gates with proper testing approach
+**Strong points**: Comprehensive context, clear task breakdown, existing patterns to follow, executable validation gates
 
-**Minor risk areas**: 
-- FDIC API response format changes over time (mitigated by schema validation)
-- Cache invalidation strategy not fully specified (low impact)
+**Risk areas**: FDIC API reliability, rate limiting behavior, response format changes - mitigated by robust error handling and fallback mechanisms

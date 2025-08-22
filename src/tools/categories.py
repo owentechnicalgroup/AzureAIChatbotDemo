@@ -243,7 +243,8 @@ def sort_tools_by_priority(tools: List[BaseTool]) -> List[BaseTool]:
 # Service dependency mappings for dynamic loading
 SERVICE_CATEGORY_MAPPING = {
     "chromadb": ToolCategory.DOCUMENTS,
-    "call_report_api": ToolCategory.BANKING,
+    "fdic_api": ToolCategory.BANKING,
+    "fdic_financial_api": ToolCategory.BANKING,
     "web_search_api": ToolCategory.WEB
 }
 
