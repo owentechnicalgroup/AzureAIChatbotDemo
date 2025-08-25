@@ -1,0 +1,22 @@
+{
+	"version": "2.0.0",
+	"tasks": [
+		{
+			"label": "Run Python Tests",
+			"type": "shell",
+			"command": "${workspaceFolder}/venv/Scripts/python.exe",
+			"args": [
+				"-m",
+				"pytest",
+				"tests/",
+				"-v",
+				"--tb=short"
+			],
+			"isBackground": false,
+			"problemMatcher": [
+				"$pytest"
+			],
+			"group": "test"
+		}
+	]
+}

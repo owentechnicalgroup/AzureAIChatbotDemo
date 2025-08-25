@@ -172,6 +172,11 @@ output "environment_variables" {
     OPENAI_MAX_TOKENS        = "1000"
     OPENAI_TEMPERATURE       = "0.7"
     CONVERSATION_MAX_HISTORY = "10"
+
+    # FFIEC CDR API Configuration (will be overridden by Key Vault)
+    FFIEC_CDR_ENABLED         = "true"
+    FFIEC_CDR_TIMEOUT_SECONDS = "30"
+    FFIEC_CDR_CACHE_TTL       = "3600"
   }
   sensitive = true
 }

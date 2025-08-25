@@ -259,6 +259,14 @@ def build_fdic_query(search_params: Dict) -> Dict[str, str]:
     query_params["limit"] = str(min(limit, FDIC_API_LIMITS["max_results_per_query"]))
     query_params["format"] = "json"
     
+    # Add field selection to ensure we get RSSD identifiers
+    # Request key fields including both RSSD and FED_RSSD
+    requested_fields = [
+        "CERT", "NAME", "RSSD", "FED_RSSD", "CITY", "COUNTY", 
+        "STNAME", "STALP", "ZIP", "ACTIVE", "ASSET", "DEP", "OFFICES"
+    ]
+    query_params["fields"] = ",".join(requested_fields)
+    
     return query_params
 
 

@@ -87,6 +87,7 @@ FIELD_SELECTION_TEMPLATES = {
     ],
     "key_ratios": [
         "CERT", "REPDTE", "ASSET", "EQ", "NETINC",
+        "NETINTINC", "INTINC", "EINTEXP",  # Added for NIM calculation
         "ROA", "ROE", "NIM", "CET1R", "TIER1R", "TOTCAPR"
     ],
     "asset_quality": [

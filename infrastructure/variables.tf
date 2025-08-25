@@ -226,3 +226,28 @@ variable "tenant_id" {
   type        = string
   default     = null
 }
+
+# FFIEC CDR API Configuration
+variable "ffiec_cdr_api_key" {
+  description = "FFIEC CDR API key (PIN) for Call Report data access"
+  type        = string
+  default     = ""
+  sensitive   = true
+
+  validation {
+    condition     = length(var.ffiec_cdr_api_key) == 0 || length(var.ffiec_cdr_api_key) >= 8
+    error_message = "FFIEC CDR API key must be at least 8 characters if provided."
+  }
+}
+
+variable "ffiec_cdr_username" {
+  description = "FFIEC CDR username for authentication"
+  type        = string
+  default     = ""
+  sensitive   = true
+
+  validation {
+    condition     = length(var.ffiec_cdr_username) == 0 || length(var.ffiec_cdr_username) >= 3
+    error_message = "FFIEC CDR username must be at least 3 characters if provided."
+  }
+}

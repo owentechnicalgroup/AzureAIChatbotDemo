@@ -19,6 +19,7 @@ from langchain.callbacks.manager import (
 )
 
 from ..atomic.fdic_institution_search_tool import FDICInstitutionSearchTool
+from ..atomic.ffiec_call_report_data_tool import FFIECCallReportDataTool
 from ..infrastructure.banking.fdic_financial_api import FDICFinancialAPI
 from ..infrastructure.banking.fdic_financial_models import BankFinancialAnalysisInput
 from ..infrastructure.banking.fdic_financial_constants import format_financial_value
@@ -38,10 +39,11 @@ class BankAnalysisTool(BaseTool):
     name: str = "bank_analysis"
     description: str = """Modern banking analysis tool with FDIC Financial Data API integration.
 
-This tool provides comprehensive financial analysis using authoritative FDIC data sources:
+This tool provides comprehensive financial analysis using authoritative regulatory data sources:
 - FDIC BankFind Suite API for real-time bank identification  
 - FDIC Financial Data API for official regulatory financial metrics
-- Real financial ratios calculated from actual FDIC data
+- FFIEC Call Report data for detailed regulatory filings (when available)
+- Real financial ratios calculated from actual regulatory data
 
 Financial Analysis Capabilities:
 - Complete financial summaries with balance sheet and income data
@@ -94,7 +96,17 @@ Returns: Professional financial analysis using real FDIC regulatory data with fo
             cache_ttl=settings.fdic_financial_cache_ttl
         ))
         
-        logger.info("BankAnalysisTool initialized with FDIC Financial API integration")
+        # Initialize FFIEC Call Report tool if available
+        if (getattr(settings, 'ffiec_cdr_enabled', True) and 
+            settings.ffiec_cdr_api_key and 
+            settings.ffiec_cdr_username):
+            object.__setattr__(self, '_ffiec_client', FFIECCallReportDataTool(settings=settings))
+            object.__setattr__(self, '_has_ffiec', True)
+            logger.info("BankAnalysisTool initialized with FDIC and FFIEC Call Report integration")
+        else:
+            object.__setattr__(self, '_ffiec_client', None)
+            object.__setattr__(self, '_has_ffiec', False)
+            logger.info("BankAnalysisTool initialized with FDIC integration only")
     
     @property
     def bank_lookup(self) -> FDICInstitutionSearchTool:
@@ -105,6 +117,16 @@ Returns: Professional financial analysis using real FDIC regulatory data with fo
     def financial_client(self) -> FDICFinancialAPI:
         """Get the FDIC Financial API client."""
         return getattr(self, '_financial_client')
+    
+    @property
+    def ffiec_client(self) -> Optional[FFIECCallReportDataTool]:
+        """Get the FFIEC Call Report tool."""
+        return getattr(self, '_ffiec_client', None)
+    
+    @property
+    def has_ffiec_integration(self) -> bool:
+        """Check if FFIEC Call Report integration is available."""
+        return getattr(self, '_has_ffiec', False)
     
     def _run(
         self,
@@ -189,9 +211,10 @@ Returns: Professional financial analysis using real FDIC regulatory data with fo
                     if result_data.get('success') and result_data.get('institutions'):
                         institution = result_data['institutions'][0]
                         cert_id = institution.get('cert')
-                        # Update bank info with actual data
+                        # Update bank info with actual data including institution details
                         bank_info["name"] = institution.get('name', bank_name)
                         bank_info["location"] = institution.get('location', {})
+                        bank_info["institution"] = institution  # Store full institution data for RSSD access
                         
                         logger.info(
                             "Successfully extracted certificate ID from structured lookup", 
@@ -260,6 +283,12 @@ Data Source: FDIC BankFind Suite Financial API"""
             # Get basic financial data
             latest_data = financial_response.financial_records[0]
             
+            # Update bank_info with RSSD ID from FDIC data (or "N/A" if not available)
+            # Try rssd first, then fed_rssd from the institution lookup, then fallback to N/A
+            rssd_from_fdic = latest_data.rssd if latest_data.rssd else None
+            rssd_from_lookup = bank_info.get("institution", {}).get("fed_rssd") if bank_info.get("institution") else None
+            bank_info["rssd"] = rssd_from_fdic or rssd_from_lookup or "N/A"
+            
             return f"""Bank Analysis - Basic Information:
 
 Bank: {bank_info.get('name', 'Unknown')}
@@ -316,6 +345,12 @@ Data Source: FDIC BankFind Suite Financial API"""
             # Get most recent financial data
             latest_data = financial_response.financial_records[0]
             
+            # Update bank_info with RSSD ID from FDIC data (or "N/A" if not available)
+            # Try rssd first, then fed_rssd from the institution lookup, then fallback to N/A
+            rssd_from_fdic = latest_data.rssd if latest_data.rssd else None
+            rssd_from_lookup = bank_info.get("institution", {}).get("fed_rssd") if bank_info.get("institution") else None
+            bank_info["rssd"] = rssd_from_fdic or rssd_from_lookup or "N/A"
+            
             return f"""Bank Analysis - Financial Summary:
 
 Bank: {bank_info.get('name', 'Unknown')}
@@ -371,6 +406,12 @@ Data Source: FDIC BankFind Suite Financial API"""
                 
             latest_data = financial_response.financial_records[0]
             
+            # Update bank_info with RSSD ID from FDIC data (or "N/A" if not available)
+            # Try rssd first, then fed_rssd from the institution lookup, then fallback to N/A
+            rssd_from_fdic = latest_data.rssd if latest_data.rssd else None
+            rssd_from_lookup = bank_info.get("institution", {}).get("fed_rssd") if bank_info.get("institution") else None
+            bank_info["rssd"] = rssd_from_fdic or rssd_from_lookup or "N/A"
+            
             # Get calculated ratios from FDIC data and derive additional ones
             calculated_ratios = latest_data.calculate_derived_ratios()
             
@@ -413,11 +454,32 @@ Asset Quality:
 Data Quality: {len(latest_data.get_available_fields())} financial metrics available
 Calculation Method: FDIC reported ratios with calculated supplements
 Data Source: FDIC BankFind Suite Financial API
-Analysis Type: Key Financial Ratios"""
+Analysis Type: Key Financial Ratios
+
+Additional Data Sources Available:
+{self._get_data_sources_summary(bank_info.get('rssd'))}"""
             
         except Exception as e:
             logger.error("Key ratios calculation failed", error=str(e), cert_id=cert_id)
             return f"Error calculating financial ratios: {str(e)}"
+    
+    def _get_data_sources_summary(self, rssd_id: Optional[str] = None) -> str:
+        """Get summary of available data sources for this bank."""
+        sources = []
+        
+        # FDIC data is always available if tool is working
+        sources.append("- FDIC Financial Data: Available")
+        
+        # Check FFIEC Call Report availability
+        if self.has_ffiec_integration:
+            if rssd_id:
+                sources.append(f"- FFIEC Call Reports: Available (use ffiec_call_report_data tool with RSSD {rssd_id})")
+            else:
+                sources.append("- FFIEC Call Reports: Available (requires RSSD ID)")
+        else:
+            sources.append("- FFIEC Call Reports: Not configured")
+        
+        return "\n".join(sources)
     
     def is_available(self) -> bool:
         """Check if the bank analysis service is available."""

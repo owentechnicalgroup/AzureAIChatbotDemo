@@ -224,10 +224,12 @@ Output is structured JSON, not text - no parsing required for downstream tools."
         }
         
         for institution in institutions:
-            # Create clean institution record
+            # Create clean institution record including RSSD identifiers
             inst_data = {
                 "name": institution.name,
                 "cert": institution.cert,
+                "rssd": institution.rssd,  # Include RSSD if available
+                "fed_rssd": institution.fed_rssd,  # Include FED_RSSD if available  
                 "location": {
                     "city": institution.city,
                     "county": institution.county,

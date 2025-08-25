@@ -228,6 +228,33 @@ resource "azurerm_key_vault_secret" "chat_observability_connection_string" {
   ]
 }
 
+# Store FFIEC CDR API credentials in Key Vault (if provided)
+resource "azurerm_key_vault_secret" "ffiec_cdr_api_key" {
+  count        = var.ffiec_cdr_api_key != "" ? 1 : 0
+  name         = "ffiec-cdr-api-key"
+  value        = var.ffiec_cdr_api_key
+  key_vault_id = azurerm_key_vault.main.id
+  
+  depends_on = [
+    azurerm_key_vault.main,
+    azurerm_role_assignment.deployer_keyvault_access,
+    null_resource.rbac_propagation_wait
+  ]
+}
+
+resource "azurerm_key_vault_secret" "ffiec_cdr_username" {
+  count        = var.ffiec_cdr_username != "" ? 1 : 0
+  name         = "ffiec-cdr-username"
+  value        = var.ffiec_cdr_username
+  key_vault_id = azurerm_key_vault.main.id
+  
+  depends_on = [
+    azurerm_key_vault.main,
+    azurerm_role_assignment.deployer_keyvault_access,
+    null_resource.rbac_propagation_wait
+  ]
+}
+
 # Optional: Storage Account for logs and conversation history
 resource "azurerm_storage_account" "main" {
   name                     = var.storage_account_name

@@ -39,6 +39,11 @@ class FDICInstitution(BaseModel):
         description="RSSD ID (Federal Reserve identifier)",
         max_length=10
     )
+    fed_rssd: Optional[str] = Field(
+        None,
+        description="Federal Reserve RSSD identifier (alternative RSSD field)",
+        max_length=10
+    )
     
     # Location information
     city: Optional[str] = Field(

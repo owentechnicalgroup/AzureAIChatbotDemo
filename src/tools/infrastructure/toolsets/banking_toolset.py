@@ -12,6 +12,7 @@ from langchain.tools import BaseTool
 from src.config.settings import Settings
 from ...atomic.fdic_institution_search_tool import FDICInstitutionSearchTool
 from ...atomic.fdic_financial_data_tool import FDICFinancialDataTool
+from ...atomic.ffiec_call_report_data_tool import FFIECCallReportDataTool
 from ...composite.bank_analysis_tool import BankAnalysisTool
 
 logger = structlog.get_logger(__name__).bind(log_type="SYSTEM")
@@ -54,24 +55,53 @@ class BankingToolset:
         )
     
     def _initialize_tools(self) -> None:
-        """Initialize clean atomic FDIC tools with simplified architecture."""
+        """Initialize clean atomic banking tools with FDIC and FFIEC integration."""
         try:
+            tools = []
+            
             # Create clean atomic FDIC tools
             fdic_institution_search = FDICInstitutionSearchTool(settings=self.settings)
             fdic_financial_data = FDICFinancialDataTool(settings=self.settings)
-            bank_analysis = BankAnalysisTool()  # Keep composite tool for backwards compatibility
+            tools.extend([fdic_institution_search, fdic_financial_data])
             
-            self._tools = [fdic_institution_search, fdic_financial_data, bank_analysis]
+            # Add FFIEC Call Report tool if enabled and configured
+            if (getattr(self.settings, 'ffiec_cdr_enabled', True) and 
+                self.settings.ffiec_cdr_api_key and 
+                self.settings.ffiec_cdr_username):
+                
+                ffiec_call_report = FFIECCallReportDataTool(settings=self.settings)
+                tools.append(ffiec_call_report)
+                self.logger.info(
+                    "FFIEC Call Report tool enabled",
+                    has_ffiec_credentials=bool(self.settings.ffiec_cdr_api_key),
+                    ffiec_timeout=getattr(self.settings, 'ffiec_cdr_timeout_seconds', 30),
+                    ffiec_cache_ttl=getattr(self.settings, 'ffiec_cdr_cache_ttl', 3600)
+                )
+            else:
+                self.logger.info(
+                    "FFIEC Call Report tool disabled",
+                    ffiec_enabled=getattr(self.settings, 'ffiec_cdr_enabled', False),
+                    has_api_key=bool(getattr(self.settings, 'ffiec_cdr_api_key', None)),
+                    has_username=bool(getattr(self.settings, 'ffiec_cdr_username', None))
+                )
+            
+            # Keep composite tool for backwards compatibility
+            bank_analysis = BankAnalysisTool()
+            tools.append(bank_analysis)
+            
+            self._tools = tools
             
             self.logger.info(
-                "Clean atomic FDIC tools initialized",
+                "Banking tools initialized with FDIC and FFIEC integration",
                 tool_count=len(self._tools),
                 tool_names=[tool.name for tool in self._tools],
+                has_fdic_api_key=bool(self.settings.fdic_api_key),
+                has_ffiec_credentials=bool(getattr(self.settings, 'ffiec_cdr_api_key', None)),
                 architecture="atomic_with_composite_compatibility"
             )
             
         except Exception as e:
-            self.logger.error("Failed to initialize FDIC Financial API banking tools", error=str(e))
+            self.logger.error("Failed to initialize banking tools", error=str(e))
             self._tools = []
     
     def get_tools(self) -> List[BaseTool]:

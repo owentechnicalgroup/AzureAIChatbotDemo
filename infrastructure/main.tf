@@ -78,6 +78,10 @@ module "azure_openai" {
   developer_object_ids = var.developer_object_ids
   create_app_service   = var.create_app_service
 
+  # FFIEC CDR API configuration
+  ffiec_cdr_api_key  = var.ffiec_cdr_api_key
+  ffiec_cdr_username = var.ffiec_cdr_username
+
   # Resource tagging
   common_tags = local.tags
 

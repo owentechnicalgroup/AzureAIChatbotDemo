@@ -1,0 +1,77 @@
+{
+  // VS Code debugging configuration for Python tests
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "Debug All Tests",
+      "type": "debugpy",
+      "request": "launch",
+      "module": "pytest",
+      "args": ["tests", "-v", "--tb=short"],
+      "console": "integratedTerminal",
+      "env": {
+        "PYTHONPATH": "${workspaceFolder}/src"
+      },
+      "cwd": "${workspaceFolder}",
+      "python": "${workspaceFolder}/venv/Scripts/python.exe"
+    },
+    {
+      "name": "Debug Current Test File",
+      "type": "debugpy",
+      "request": "launch",
+      "module": "pytest",
+      "args": ["${file}", "-v", "--tb=short"],
+      "console": "integratedTerminal",
+      "env": {
+        "PYTHONPATH": "${workspaceFolder}/src"
+      },
+      "cwd": "${workspaceFolder}",
+      "python": "${workspaceFolder}/venv/Scripts/python.exe"
+    },
+    {
+      "name": "Debug Unit Tests",
+      "type": "debugpy",
+      "request": "launch",
+      "module": "pytest",
+      "args": ["tests/tools/unit", "-v", "-m", "unit"],
+      "console": "integratedTerminal",
+      "env": {
+        "PYTHONPATH": "${workspaceFolder}/src"
+      },
+      "cwd": "${workspaceFolder}",
+      "python": "${workspaceFolder}/venv/Scripts/python.exe"
+    },
+    {
+      "name": "Debug Integration Tests",
+      "type": "debugpy",
+      "request": "launch",
+      "module": "pytest",
+      "args": ["tests/tools/integration", "-v", "-m", "integration"],
+      "console": "integratedTerminal",
+      "env": {
+        "PYTHONPATH": "${workspaceFolder}/src"
+      },
+      "cwd": "${workspaceFolder}",
+      "python": "${workspaceFolder}/venv/Scripts/python.exe"
+    },
+    {
+      "name": "Debug Tests with Coverage",
+      "type": "debugpy",
+      "request": "launch",
+      "module": "pytest",
+      "args": [
+        "tests",
+        "--cov=src",
+        "--cov-report=html",
+        "--cov-report=term-missing",
+        "-v"
+      ],
+      "console": "integratedTerminal",
+      "env": {
+        "PYTHONPATH": "${workspaceFolder}/src"
+      },
+      "cwd": "${workspaceFolder}",
+      "python": "${workspaceFolder}/venv/Scripts/python.exe"
+    }
+  ]
+}

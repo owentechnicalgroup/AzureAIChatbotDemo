@@ -164,12 +164,12 @@ Use Cases:
             
             with concurrent.futures.ThreadPoolExecutor() as executor:
                 future = executor.submit(
-                    lambda: asyncio.run(self._arun(cert_id, analysis_type, quarters, report_date, run_manager))
+                    lambda: asyncio.run(self._arun(cert_id, analysis_type, quarters, report_date, None))
                 )
                 return future.result()
                 
         except RuntimeError:
-            return asyncio.run(self._arun(cert_id, analysis_type, quarters, report_date, run_manager))
+            return asyncio.run(self._arun(cert_id, analysis_type, quarters, report_date, None))
     
     async def _arun(
         self,
@@ -189,7 +189,7 @@ Use Cases:
             start_time = datetime.now(timezone.utc)
             
             logger.info(
-                "Retrieving FDIC financial data",
+                "Starting FDIC financial data retrieval",
                 cert_id=cert_id,
                 analysis_type=analysis_type,
                 quarters=quarters,
@@ -198,10 +198,30 @@ Use Cases:
             
             # Validate input
             if not cert_id or not cert_id.isdigit():
+                logger.warning(
+                    "Invalid cert_id provided",
+                    cert_id=cert_id,
+                    analysis_type=analysis_type,
+                    error="cert_id must be numeric"
+                )
                 return self._format_error("Invalid cert_id - must be numeric FDIC certificate number")
             
             if analysis_type not in ["basic_info", "financial_summary", "key_ratios"]:
+                logger.warning(
+                    "Invalid analysis_type provided",
+                    cert_id=cert_id,
+                    analysis_type=analysis_type,
+                    valid_types=["basic_info", "financial_summary", "key_ratios"]
+                )
                 return self._format_error("Invalid analysis_type - use 'basic_info', 'financial_summary', or 'key_ratios'")
+            
+            logger.info(
+                "Calling FDIC Financial API",
+                cert_id=cert_id,
+                analysis_type=analysis_type,
+                quarters=quarters,
+                report_date=report_date
+            )
             
             # Retrieve financial data from FDIC API
             response = await self.financial_client.get_financial_data(
@@ -212,10 +232,29 @@ Use Cases:
             )
             
             if not response.success:
+                logger.error(
+                    "FDIC API call failed",
+                    cert_id=cert_id,
+                    analysis_type=analysis_type,
+                    error_message=response.error_message
+                )
                 return self._format_error(f"FDIC financial data retrieval failed: {response.error_message}")
             
             if not response.financial_records:
+                logger.warning(
+                    "No financial data found",
+                    cert_id=cert_id,
+                    analysis_type=analysis_type,
+                    quarters=quarters
+                )
                 return self._format_no_data(cert_id)
+            
+            logger.info(
+                "Processing financial data response",
+                cert_id=cert_id,
+                analysis_type=analysis_type,
+                records_found=len(response.financial_records)
+            )
             
             # Format results based on analysis type
             if analysis_type == "basic_info":
@@ -225,20 +264,34 @@ Use Cases:
             elif analysis_type == "key_ratios":
                 result = self._format_key_ratios(response.financial_records[0], cert_id)
             else:
+                logger.error(
+                    "Unsupported analysis type in formatting",
+                    cert_id=cert_id,
+                    analysis_type=analysis_type
+                )
                 result = self._format_error(f"Unsupported analysis type: {analysis_type}")
             
             execution_time = (datetime.now(timezone.utc) - start_time).total_seconds()
             logger.info(
-                "FDIC financial data retrieval completed",
+                "FDIC financial data retrieval completed successfully",
                 cert_id=cert_id,
                 analysis_type=analysis_type,
-                execution_time=execution_time
+                quarters=quarters,
+                execution_time=execution_time,
+                result_size=len(result)
             )
             
             return result
             
         except Exception as e:
-            logger.error("FDIC financial data retrieval failed", error=str(e), cert_id=cert_id)
+            logger.error(
+                "FDIC financial data retrieval failed with exception",
+                error=str(e),
+                cert_id=cert_id,
+                analysis_type=analysis_type,
+                quarters=quarters,
+                report_date=report_date
+            )
             return self._format_error(f"Financial data retrieval failed: {str(e)}")
     
     def _format_basic_info(self, financial_data: FDICFinancialData, cert_id: str) -> str:
@@ -311,7 +364,7 @@ Use Cases:
                 },
                 "loans_and_leases": {
                     "value": float(financial_data.lnls) if financial_data.lnls else None,
-                    "formatted": format_financial_value(financial_data.lnls) if financial_data.lnls else "Not available"
+                    "formatted": format_financial_value(float(financial_data.lnls)) if financial_data.lnls else "Not available"
                 },
                 "total_equity": {
                     "value": float(financial_data.eq) if financial_data.eq else None,
@@ -325,15 +378,15 @@ Use Cases:
                 },
                 "interest_income": {
                     "value": float(financial_data.intinc) if financial_data.intinc else None,
-                    "formatted": format_financial_value(financial_data.intinc) if financial_data.intinc else "Not available"
+                    "formatted": format_financial_value(float(financial_data.intinc)) if financial_data.intinc else "Not available"
                 },
                 "interest_expense": {
                     "value": float(financial_data.eintexp) if financial_data.eintexp else None,
-                    "formatted": format_financial_value(financial_data.eintexp) if financial_data.eintexp else "Not available"
+                    "formatted": format_financial_value(float(financial_data.eintexp)) if financial_data.eintexp else "Not available"
                 },
                 "net_interest_income": {
                     "value": float(financial_data.netintinc) if financial_data.netintinc else None,
-                    "formatted": format_financial_value(financial_data.netintinc) if financial_data.netintinc else "Not available"
+                    "formatted": format_financial_value(float(financial_data.netintinc)) if financial_data.netintinc else "Not available"
                 }
             },
             "data_quality": {

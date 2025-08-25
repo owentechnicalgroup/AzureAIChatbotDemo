@@ -307,8 +307,16 @@ class FDICFinancialAPI:
             
             return FDICFinancialAPIResponse(
                 success=False,
+                data=None,
+                metadata=None,
                 error_message=f"FDIC Financial API request failed: {str(e)}",
-                timestamp=datetime.now(timezone.utc).isoformat()
+                timestamp=datetime.now(timezone.utc).isoformat(),
+                query_info={
+                    "cert_id": cert_id,
+                    "analysis_type": analysis_type,
+                    "quarters": quarters,
+                    "report_date": report_date
+                }
             )
     
     def _build_query_parameters(
@@ -563,6 +571,7 @@ class FDICFinancialAPI:
                 success=True,
                 data=financial_records,
                 metadata=metadata,
+                error_message=None,
                 timestamp=datetime.now(timezone.utc).isoformat(),
                 query_info={
                     "query_params": query_params,
@@ -580,6 +589,8 @@ class FDICFinancialAPI:
             
             return FDICFinancialAPIResponse(
                 success=False,
+                data=None,
+                metadata=None,
                 error_message=f"Failed to process FDIC Financial API response: {str(e)}",
                 timestamp=datetime.now(timezone.utc).isoformat(),
                 query_info={"query_params": query_params}

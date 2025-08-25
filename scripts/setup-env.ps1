@@ -380,6 +380,22 @@ CHATBOT_LOG_LEVEL=$($TerraformOutputs.LOG_LEVEL)
 # Development mode (set to False for production)
 DEBUG=$(if ($TerraformOutputs.ENVIRONMENT -eq "dev") { "True" } else { "False" })
 
+# =============================================================================
+# FFIEC CDR API CONFIGURATION
+# =============================================================================
+
+# Enable FFIEC Call Data Repository integration for call report data
+FFIEC_CDR_ENABLED=$($TerraformOutputs.FFIEC_CDR_ENABLED)
+
+# FFIEC CDR API timeout in seconds
+FFIEC_CDR_TIMEOUT_SECONDS=$($TerraformOutputs.FFIEC_CDR_TIMEOUT_SECONDS)
+
+# FFIEC CDR cache TTL in seconds
+FFIEC_CDR_CACHE_TTL=$($TerraformOutputs.FFIEC_CDR_CACHE_TTL)
+
+# Note: FFIEC CDR API credentials (FFIEC_CDR_API_KEY, FFIEC_CDR_USERNAME) 
+# are stored securely in Azure Key Vault and retrieved automatically
+
 "@
 
     return $content

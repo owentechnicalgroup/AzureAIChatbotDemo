@@ -153,6 +153,8 @@ class _CredentialManager:
             ("embedding-deployment-name", "azure_embedding_deployment"),
             ("applicationinsights-connection-string", "applicationinsights_connection_string"),
             ("chat-observability-connection-string", "chat_observability_connection_string"),
+            ("ffiec-cdr-api-key", "ffiec_cdr_api_key"),
+            ("ffiec-cdr-username", "ffiec_cdr_username"),
         ]
         
         for vault_name, settings_key in secret_names:
@@ -474,6 +476,37 @@ class Settings(BaseSettings):
         description="FDIC Financial API cache TTL in seconds (5 min to 2 hours)"
     )
     
+    # FFIEC CDR API Configuration
+    ffiec_cdr_enabled: bool = Field(
+        True,
+        env='FFIEC_CDR_ENABLED',
+        description="Enable FFIEC CDR Public Data Distribution API for call report data"
+    )
+    ffiec_cdr_api_key: Optional[str] = Field(
+        None,
+        env='FFIEC_CDR_API_KEY',
+        description="FFIEC CDR API key (PIN) for call report data access"
+    )
+    ffiec_cdr_username: Optional[str] = Field(
+        None,
+        env='FFIEC_CDR_USERNAME',
+        description="FFIEC CDR username for authentication"
+    )
+    ffiec_cdr_timeout_seconds: int = Field(
+        30,
+        ge=5,
+        le=300,
+        env='FFIEC_CDR_TIMEOUT_SECONDS',
+        description="FFIEC CDR API request timeout in seconds"
+    )
+    ffiec_cdr_cache_ttl: int = Field(
+        3600,
+        ge=300,
+        le=7200,
+        env='FFIEC_CDR_CACHE_TTL',
+        description="FFIEC CDR call report data cache TTL in seconds (5 min to 2 hours)"
+    )
+    
     # Feature Flags
     enable_conversation_logging: bool = Field(
         True,
@@ -581,6 +614,16 @@ class Settings(BaseSettings):
             # Chat Observability connection string
             if cached_secrets.get("chat_observability_connection_string") and cached_secrets["chat_observability_connection_string"] != self.chat_observability_connection_string:
                 self.chat_observability_connection_string = cached_secrets["chat_observability_connection_string"]
+                secrets_loaded += 1
+            
+            # FFIEC CDR API key
+            if cached_secrets.get("ffiec_cdr_api_key") and cached_secrets["ffiec_cdr_api_key"] != self.ffiec_cdr_api_key:
+                self.ffiec_cdr_api_key = cached_secrets["ffiec_cdr_api_key"]
+                secrets_loaded += 1
+            
+            # FFIEC CDR username
+            if cached_secrets.get("ffiec_cdr_username") and cached_secrets["ffiec_cdr_username"] != self.ffiec_cdr_username:
+                self.ffiec_cdr_username = cached_secrets["ffiec_cdr_username"]
                 secrets_loaded += 1
             
             logger.info(

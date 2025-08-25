@@ -287,3 +287,18 @@ variable "environment" {
     error_message = "Environment must be one of: dev, staging, prod."
   }
 }
+
+# FFIEC CDR API Configuration
+variable "ffiec_cdr_api_key" {
+  description = "FFIEC CDR API key (PIN) for Call Report data access"
+  type        = string
+  default     = ""
+  sensitive   = true
+}
+
+variable "ffiec_cdr_username" {
+  description = "FFIEC CDR username for authentication"
+  type        = string
+  default     = ""
+  sensitive   = true
+}

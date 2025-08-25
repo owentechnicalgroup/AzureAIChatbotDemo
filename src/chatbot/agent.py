@@ -6,7 +6,7 @@ Uses LangChain's native features with optional RAG tool integration for multi-st
 import os
 import time
 import uuid
-from typing import Dict, List, Any, Optional
+from typing import Dict, List, Any, Optional, cast
 from datetime import datetime, timezone
 import structlog
 
@@ -14,6 +14,7 @@ from langchain_core.messages import BaseMessage, HumanMessage, SystemMessage
 from langchain_core.chat_history import InMemoryChatMessageHistory
 from langchain_community.chat_message_histories import FileChatMessageHistory
 from langchain_core.runnables.history import RunnableWithMessageHistory
+from langchain_core.runnables import RunnableConfig
 from langchain_core.output_parsers import StrOutputParser
 from langchain.agents import create_openai_tools_agent, AgentExecutor
 from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
@@ -118,7 +119,7 @@ class ChatbotAgent:
             "summarizer": "You are an AI summarizer. Provide concise, accurate summaries highlighting key points."
         }
         
-        base_prompt = base_prompts.get(prompt_type, base_prompts["default"])
+        base_prompt = base_prompts.get(prompt_type or "default", base_prompts["default"])
         
         # Enhance prompt for multi-step conversations if tools are available
         if self.enable_multi_step and self.tools:
@@ -170,6 +171,26 @@ Examples:
 - "Analyze Bank of America's financial performance"
 - "Compare Citibank's assets to deposits"
 Action: bank_analysis() with appropriate query_type
+
+🏛️ CALL REPORT DATA → ffiec_call_report_data
+Intent: User requesting official FFIEC Call Report regulatory filings or detailed financial data
+Keywords: "call report", "FFIEC", "regulatory filing", "bank filing", "quarterly report", "RSSD", "facsimile", "official data"
+Call Report Data Categories:
+- Balance Sheet items: "total assets", "liabilities", "equity capital", "loan balances", "deposits"
+- Income Statement items: "net income", "interest income", "noninterest income", "operating expenses" 
+- Capital Adequacy: "Tier 1 capital", "risk-weighted assets", "capital ratios"
+- Loan Performance: "nonperforming loans", "charge-offs", "loan loss provisions"
+- Liquidity and Funding: "cash balances", "borrowings", "funding sources"
+- Institution-level metrics: "return on assets (ROA)", "return on equity (ROE)", "efficiency ratio"
+Examples:
+- "Get the call report for Wells Fargo"
+- "What is the latest FFIEC filing for RSSD 451965?"
+- "Show me the call report data for JPMorgan Chase"
+- "Retrieve the quarterly regulatory filing for Bank of America"
+- "I need the official FFIEC call report for this bank"
+- "What are Wells Fargo's nonperforming loans from the call report?"
+- "Show me JPMorgan's Tier 1 capital from their regulatory filing"
+Action: ffiec_call_report_data() with RSSD ID
 
 MULTI-TOOL SCENARIOS (Only when explicitly needed):
 - COMPARISON queries: "Compare document policy with Wells Fargo's ratios"
@@ -232,13 +253,13 @@ PERFORMANCE PRINCIPLES:
         # Simple chain: add system prompt -> LLM -> string output
         def add_system_prompt(messages: List[BaseMessage]) -> List[BaseMessage]:
             """Add system prompt and manage context window."""
-            result = [SystemMessage(content=self.system_prompt)]
+            result: List[BaseMessage] = [SystemMessage(content=self.system_prompt)]
             
             # Simple context window management
             max_messages = (self.settings.max_conversation_turns * 2) if self.settings.max_conversation_turns else 20
             recent_messages = messages[-max_messages:] if len(messages) > max_messages else messages
             
-            result.extend(msg for msg in recent_messages if not isinstance(msg, SystemMessage))
+            result.extend([msg for msg in recent_messages if not isinstance(msg, SystemMessage)])
             return result
         
         # Create simple chain
@@ -246,7 +267,7 @@ PERFORMANCE PRINCIPLES:
         
         # Wrap with message history - LangChain handles everything else
         self.conversation_chain = RunnableWithMessageHistory(
-            chain,
+            cast(Any, chain),  # Type assertion to work around LangChain typing
             lambda session_id: create_session_history(session_id, self.persistence_file),
             input_messages_key=None,
             history_messages_key=None,
@@ -319,7 +340,7 @@ PERFORMANCE PRINCIPLES:
             else:
                 # Simple mode: Use conversation chain directly
                 self.logger.info("Processing with simple conversation chain")
-                config = {"configurable": {"session_id": self.conversation_id}}
+                config: RunnableConfig = {"configurable": {"session_id": self.conversation_id}}
                 response_content = self.conversation_chain.invoke(
                     [HumanMessage(content=user_message)],
                     config=config
@@ -391,7 +412,7 @@ PERFORMANCE PRINCIPLES:
             else:
                 # Simple mode: Stream from conversation chain
                 self.logger.info("Streaming with simple conversation chain")
-                config = {"configurable": {"session_id": self.conversation_id}}
+                config: RunnableConfig = {"configurable": {"session_id": self.conversation_id}}
                 
                 for chunk in self.conversation_chain.stream(
                     [HumanMessage(content=user_message)],
@@ -534,6 +555,94 @@ PERFORMANCE PRINCIPLES:
         except Exception as e:
             self.logger.error("Failed to save conversation", error=str(e))
             raise
+    
+    def run_interactive_session(self, max_turns: int = 50, welcome_message: bool = True):
+        """
+        Run an interactive chat session with the user.
+        
+        Args:
+            max_turns: Maximum number of conversation turns
+            welcome_message: Whether to show a welcome message
+        """
+        try:
+            from src.utils.console import Console
+            console = Console()
+        except ImportError:
+            # Fallback if console utils not available
+            class SimpleConsole:
+                def print_status(self, msg, status): print(f"[{status.upper()}] {msg}")
+                def confirm(self, msg, default): return input(f"{msg} [y/N]: ").lower().startswith('y')
+            console = SimpleConsole()
+        
+        if welcome_message:
+            console.print_status("🤖 Azure OpenAI Chatbot started!", "success")
+            console.print_status("Type 'quit', 'exit', or press Ctrl+C to end the conversation", "info")
+            print()
+        
+        turn_count = 0
+        
+        try:
+            while turn_count < max_turns:
+                try:
+                    # Get user input
+                    user_input = input("🧑 You: ").strip()
+                    
+                    # Check for exit commands
+                    if user_input.lower() in ['quit', 'exit', 'bye']:
+                        console.print_status("Goodbye! 👋", "success")
+                        break
+                    
+                    if not user_input:
+                        continue
+                    
+                    # Process the message
+                    print("🤖 Assistant: ", end="", flush=True)
+                    
+                    # Use streaming response for better UX
+                    try:
+                        for chunk in self.stream_response(user_input):
+                            if chunk.get('type') == 'content':
+                                content = chunk.get('content', '')
+                                print(content, end="", flush=True)
+                            elif chunk.get('type') == 'error':
+                                console.print_status(f"Error: {chunk.get('content')}", "error")
+                                break
+                    except Exception as stream_error:
+                        # Fallback to regular process_message if streaming fails
+                        self.logger.warning("Streaming failed, using regular response", error=str(stream_error))
+                        response = self.process_message(user_input)
+                        print(response.get('response', 'Sorry, I encountered an error.'))
+                    
+                    print()  # New line after response
+                    print()  # Extra line for readability
+                    
+                    turn_count += 1
+                    
+                except KeyboardInterrupt:
+                    print()  # New line after Ctrl+C
+                    console.print_status("Chat interrupted by user", "warning")
+                    break
+                except EOFError:
+                    print()  # New line after EOF
+                    console.print_status("Input stream ended", "info")
+                    break
+                except Exception as e:
+                    console.print_status(f"Error processing message: {str(e)}", "error")
+                    self.logger.error("Error in interactive session", error=str(e))
+        
+        except Exception as e:
+            try:
+                console.print_status(f"Session error: {str(e)}", "error")
+            except:
+                print(f"Session error: {str(e)}")
+            self.logger.error("Interactive session failed", error=str(e))
+        
+        finally:
+            if turn_count > 0:
+                try:
+                    console.print_status(f"Session ended after {turn_count} turns", "info")
+                except:
+                    print(f"Session ended after {turn_count} turns")
     
     def __repr__(self) -> str:
         """String representation."""
