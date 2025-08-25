@@ -599,7 +599,7 @@ class FDICFinancialAPI:
     async def get_financial_data_by_cert(
         self, 
         cert_id: str, 
-        analysis_type: str = "financial_summary",
+        analysis_type: str = "profitability",
         quarters: int = 1
     ) -> FDICFinancialAPIResponse:
         """

@@ -33,8 +33,8 @@ class FDICFinancialDataInput(BaseModel):
         max_length=10
     )
     analysis_type: str = Field(
-        "financial_summary",
-        description="Type of financial analysis: 'basic_info', 'financial_summary', or 'key_ratios'"
+        "profitability",
+        description="Type of financial analysis - see tool description for complete list of 24 analysis types covering all aspects of bank financial data"
     )
     quarters: int = Field(
         1,
@@ -50,7 +50,8 @@ class FDICFinancialDataInput(BaseModel):
     @property
     def is_valid_analysis_type(self) -> bool:
         """Check if analysis type is valid."""
-        return self.analysis_type in ["basic_info", "financial_summary", "key_ratios"]
+        from ..infrastructure.banking.fdic_financial_constants import FIELD_SELECTION_TEMPLATES
+        return self.analysis_type in FIELD_SELECTION_TEMPLATES
 
 
 class FDICFinancialDataTool(BaseTool):
@@ -87,43 +88,77 @@ class FDICFinancialDataTool(BaseTool):
     description: str = """Retrieve financial data for FDIC-insured institutions.
 
 This atomic tool retrieves comprehensive financial data from the FDIC Financial Data API using 
-institution Certificate numbers. Provides real regulatory financial metrics and ratios.
+institution Certificate numbers. Provides real regulatory financial metrics organized by analysis type.
 
 Required Input:
 - cert_id: FDIC Certificate number (obtained from fdic_institution_search_tool)
 
 Optional Parameters:
-- analysis_type: Type of financial analysis to perform
-  * "basic_info": Core financial metrics (assets, deposits, equity, net income)
-  * "financial_summary": Complete balance sheet and income statement data
-  * "key_ratios": Detailed profitability, capital, and asset quality ratios
-- quarters: Number of recent quarters to retrieve (1-8, default: 1)
+- analysis_type: Type of financial analysis to perform (determines field selection)
+- quarters: Number of recent quarters to retrieve (1-8, default: 1)  
 - report_date: Specific report date in YYYY-MM-DD format (default: most recent)
 
-Financial Data Provided:
-- Balance sheet items (assets, deposits, loans, equity)
-- Income statement data (net income, interest income/expense)
-- Regulatory ratios (ROA, ROE, NIM, capital ratios)
-- Asset quality metrics (nonperforming loans)
-- Calculated efficiency and performance ratios
+ANALYSIS TYPES (24 comprehensive categories from FDIC RISView Data Dictionary):
+
+🔍 INSTITUTION INFORMATION:
+📋 "institution_profile": Basic institution info and classification
+📁 "institution_identification": Core ID and reporting date fields  
+🏛️ "institution_classification": Institution status and classification codes
+📜 "charter_regulatory": Charter authority and regulatory oversight
+🛡️ "insurance_classification": Deposit insurance status and fund membership
+⭐ "specialized_institution_types": Special designations (community bank, minority-owned, etc.)
+
+🌍 GEOGRAPHIC & ADMINISTRATIVE:
+🗺️ "geographic_information": Location and market information
+🏢 "fdic_administrative": FDIC regions and supervisory assignments
+🏪 "office_branch_information": Branch network and office distribution
+
+👥 CORPORATE STRUCTURE:
+🏢 "holding_company_information": Bank holding company relationships
+💼 "specialized_business": Specialized business activities and focus areas
+📋 "call_report_information": Regulatory filing information
+
+💰 BALANCE SHEET:
+🏛️ "balance_sheet_assets": Asset composition and portfolio structure
+🏦 "balance_sheet_liabilities": Funding structure and liability composition
+💰 "deposit_composition": Detailed deposit mix and maturity analysis
+🏠 "loan_portfolio": Loan composition by type and category
+💎 "securities_investments": Securities holdings and short-term investments
+🏗️ "borrowings_liabilities": Non-deposit liabilities and borrowing arrangements
+🧱 "equity_capital_components": Detailed equity capital breakdown
+
+⚠️ CREDIT RISK:
+⚠️ "credit_quality": Asset quality and credit risk metrics
+🛡️ "allowance_credit_losses": Allowance for credit losses and risk reserves
+📉 "provision_credit_losses": Credit loss provisions and expense recognition
+📊 "charge_offs_recoveries": Actual charge-offs and recoveries
+
+💹 INCOME STATEMENT:
+💹 "interest_income": Interest income by source and type
+💸 "interest_expense": Interest expense and cost of funds
+💼 "noninterest_income_expense": Fee income and operating expenses
+💰 "net_income_components": Detailed net income and tax components
+💵 "dividend_information": Dividend payments and distribution policies
+
+📊 PERFORMANCE:
+📊 "profitability": Earnings metrics and return ratios
+📈 "performance_ratios": Key performance and profitability ratios
+🏛️ "capital_ratios": Regulatory capital ratios and components
+⚡ "efficiency_metrics": Operating efficiency and productivity ratios
+
+Each analysis type requests only the specific fields needed for that analysis, optimizing API performance and providing focused data sets.
 
 Data Quality:
-- Sourced from official FDIC regulatory filings
+- Sourced from official FDIC regulatory filings (RISView database)
+- Field selection optimized per analysis type for performance
 - Includes validation and completeness indicators
-- Provides metadata about data availability
 - Real financial calculations using regulatory formulas
 
 Output Format:
-- Structured JSON with financial metrics
-- Formatted currency values and percentages  
-- Data quality and completeness information
-- Calculation methodology details
-
-Use Cases:
-1. Financial analysis: Get comprehensive bank financials
-2. Ratio analysis: Calculate and compare financial ratios
-3. Trend analysis: Retrieve multiple quarters for trending
-4. Regulatory analysis: Access official FDIC filing data"""
+- Structured JSON with financial metrics specific to analysis type
+- Formatted currency values and percentages
+- Field availability and completeness information  
+- Analysis-specific calculations and derived metrics"""
     
     args_schema: Type[BaseModel] = FDICFinancialDataInput
     
@@ -174,7 +209,7 @@ Use Cases:
     async def _arun(
         self,
         cert_id: str,
-        analysis_type: str = "financial_summary", 
+        analysis_type: str = "profitability", 
         quarters: int = 1,
         report_date: Optional[str] = None,
         run_manager: Optional[AsyncCallbackManagerForToolRun] = None,
@@ -206,14 +241,18 @@ Use Cases:
                 )
                 return self._format_error("Invalid cert_id - must be numeric FDIC certificate number")
             
-            if analysis_type not in ["basic_info", "financial_summary", "key_ratios"]:
+            # Get valid analysis types from constants
+            from ..infrastructure.banking.fdic_financial_constants import FIELD_SELECTION_TEMPLATES
+            valid_analysis_types = list(FIELD_SELECTION_TEMPLATES.keys())
+            
+            if analysis_type not in valid_analysis_types:
                 logger.warning(
                     "Invalid analysis_type provided",
                     cert_id=cert_id,
                     analysis_type=analysis_type,
-                    valid_types=["basic_info", "financial_summary", "key_ratios"]
+                    valid_types=valid_analysis_types
                 )
-                return self._format_error("Invalid analysis_type - use 'basic_info', 'financial_summary', or 'key_ratios'")
+                return self._format_error(f"Invalid analysis_type - use one of: {', '.join(valid_analysis_types)}")
             
             logger.info(
                 "Calling FDIC Financial API",
@@ -256,20 +295,8 @@ Use Cases:
                 records_found=len(response.financial_records)
             )
             
-            # Format results based on analysis type
-            if analysis_type == "basic_info":
-                result = self._format_basic_info(response.financial_records[0], cert_id)
-            elif analysis_type == "financial_summary":
-                result = self._format_financial_summary(response.financial_records[0], cert_id)
-            elif analysis_type == "key_ratios":
-                result = self._format_key_ratios(response.financial_records[0], cert_id)
-            else:
-                logger.error(
-                    "Unsupported analysis type in formatting",
-                    cert_id=cert_id,
-                    analysis_type=analysis_type
-                )
-                result = self._format_error(f"Unsupported analysis type: {analysis_type}")
+            # Format results based on analysis type and available fields
+            result = self._format_financial_data(response.financial_records[0], cert_id, analysis_type)
             
             execution_time = (datetime.now(timezone.utc) - start_time).total_seconds()
             logger.info(
@@ -294,166 +321,104 @@ Use Cases:
             )
             return self._format_error(f"Financial data retrieval failed: {str(e)}")
     
-    def _format_basic_info(self, financial_data: FDICFinancialData, cert_id: str) -> str:
-        """Format basic financial information."""
-        result = {
-            "success": True,
-            "analysis_type": "basic_info",
-            "cert_id": cert_id,
-            "report_date": str(financial_data.repdte) if financial_data.repdte else None,
-            "financial_data": {
-                "total_assets": {
-                    "value": float(financial_data.asset) if financial_data.asset else None,
-                    "formatted": financial_data.format_asset(),
-                    "unit": "thousands_usd"
-                },
-                "total_deposits": {
-                    "value": float(financial_data.dep) if financial_data.dep else None,
-                    "formatted": financial_data.format_deposits(),
-                    "unit": "thousands_usd"
-                },
-                "total_equity": {
-                    "value": float(financial_data.eq) if financial_data.eq else None,
-                    "formatted": financial_data.format_equity(),
-                    "unit": "thousands_usd"
-                },
-                "net_income": {
-                    "value": float(financial_data.netinc) if financial_data.netinc else None,
-                    "formatted": financial_data.format_net_income(),
-                    "unit": "thousands_usd"
+    def _format_financial_data(self, financial_data: FDICFinancialData, cert_id: str, analysis_type: str) -> str:
+        """Format financial data dynamically based on analysis type and available fields."""
+        from ..infrastructure.banking.fdic_financial_constants import (
+            format_financial_value, 
+            ANALYSIS_TYPE_DESCRIPTIONS,
+            get_fields_for_analysis_type
+        )
+        
+        # Get the expected fields for this analysis type
+        expected_fields = set(get_fields_for_analysis_type(analysis_type))
+        available_fields = set(financial_data.get_available_fields())
+        
+        # Get analysis type metadata
+        analysis_metadata = ANALYSIS_TYPE_DESCRIPTIONS.get(analysis_type, {})
+        
+        # Helper function to safely get and format field values
+        def format_field_value(field_name: str, field_data, is_ratio: bool = False) -> Dict[str, Any]:
+            """Format a field value with proper handling for None values."""
+            if field_data is None:
+                return {
+                    "value": None,
+                    "formatted": "Not available",
+                    "unit": "percentage" if is_ratio else "thousands_usd"
                 }
-            },
-            "basic_ratios": {
-                "return_on_assets": {
-                    "value": float(financial_data.roa) if financial_data.roa else None,
-                    "formatted": financial_data.format_ratio('roa'),
-                    "unit": "percentage"
-                },
-                "return_on_equity": {
-                    "value": float(financial_data.roe) if financial_data.roe else None,
-                    "formatted": financial_data.format_ratio('roe'),
+            
+            if is_ratio:
+                return {
+                    "value": float(field_data),
+                    "formatted": f"{float(field_data):.2f}%",
                     "unit": "percentage"
                 }
-            },
-            "data_quality": {
-                "fields_available": len(financial_data.get_available_fields()),
-                "report_date": str(financial_data.repdte) if financial_data.repdte else None
-            }
-        }
+            else:
+                return {
+                    "value": float(field_data),
+                    "formatted": format_financial_value(float(field_data)),
+                    "unit": "thousands_usd"
+                }
         
-        import json
-        return json.dumps(result, indent=2)
-    
-    def _format_financial_summary(self, financial_data: FDICFinancialData, cert_id: str) -> str:
-        """Format comprehensive financial summary."""
-        from ..infrastructure.banking.fdic_financial_constants import format_financial_value
-        
+        # Build the result structure dynamically based on available fields
         result = {
             "success": True,
-            "analysis_type": "financial_summary",
+            "analysis_type": analysis_type,
             "cert_id": cert_id,
             "report_date": str(financial_data.repdte) if financial_data.repdte else None,
-            "balance_sheet": {
-                "total_assets": {
-                    "value": float(financial_data.asset) if financial_data.asset else None,
-                    "formatted": financial_data.format_asset()
-                },
-                "total_deposits": {
-                    "value": float(financial_data.dep) if financial_data.dep else None,
-                    "formatted": financial_data.format_deposits()
-                },
-                "loans_and_leases": {
-                    "value": float(financial_data.lnls) if financial_data.lnls else None,
-                    "formatted": format_financial_value(float(financial_data.lnls)) if financial_data.lnls else "Not available"
-                },
-                "total_equity": {
-                    "value": float(financial_data.eq) if financial_data.eq else None,
-                    "formatted": financial_data.format_equity()
-                }
-            },
-            "income_statement": {
-                "net_income": {
-                    "value": float(financial_data.netinc) if financial_data.netinc else None,
-                    "formatted": financial_data.format_net_income()
-                },
-                "interest_income": {
-                    "value": float(financial_data.intinc) if financial_data.intinc else None,
-                    "formatted": format_financial_value(float(financial_data.intinc)) if financial_data.intinc else "Not available"
-                },
-                "interest_expense": {
-                    "value": float(financial_data.eintexp) if financial_data.eintexp else None,
-                    "formatted": format_financial_value(float(financial_data.eintexp)) if financial_data.eintexp else "Not available"
-                },
-                "net_interest_income": {
-                    "value": float(financial_data.netintinc) if financial_data.netintinc else None,
-                    "formatted": format_financial_value(float(financial_data.netintinc)) if financial_data.netintinc else "Not available"
-                }
-            },
-            "data_quality": {
-                "fields_available": len(financial_data.get_available_fields()),
-                "report_date": str(financial_data.repdte) if financial_data.repdte else None,
-                "completeness": "High" if len(financial_data.get_available_fields()) > 10 else "Partial"
-            }
+            "financial_data": {}
         }
         
-        import json
-        return json.dumps(result, indent=2)
-    
-    def _format_key_ratios(self, financial_data: FDICFinancialData, cert_id: str) -> str:
-        """Format key financial ratios and performance metrics."""
-        # Get calculated ratios
-        calculated_ratios = financial_data.calculate_derived_ratios()
-        
-        def format_ratio_value(value) -> Dict[str, Any]:
-            """Helper to format ratio values."""
-            if value is None:
-                return {"value": None, "formatted": "Not available", "unit": "percentage"}
-            return {
-                "value": float(value),
-                "formatted": f"{float(value):.2f}%",
-                "unit": "percentage"
+        # Add analysis type description
+        if analysis_metadata:
+            result["analysis_info"] = {
+                "description": analysis_metadata.get("description", ""),
+                "use_cases": analysis_metadata.get("use_cases", [])
             }
         
-        result = {
-            "success": True,
-            "analysis_type": "key_ratios",
-            "cert_id": cert_id,
+        # Dynamically add fields based on what's available
+        field_details = analysis_metadata.get("field_details", {})
+        
+        for field_name in expected_fields:
+            if field_name in ["CERT", "REPDTE"]:
+                continue  # Skip identifier fields
+            
+            field_value = getattr(financial_data, field_name.lower(), None)
+            field_description = field_details.get(field_name, f"Field {field_name}")
+            
+            # Determine if this is a ratio field (typically percentage)
+            is_ratio = field_name.endswith('R') or field_name in ['ROA', 'ROE', 'NIM', 'CET1R', 'TIER1R', 'TOTCAPR', 'NPTLA', 'ROAPTX', 'INTEXPY']
+            
+            if field_value is not None or field_name in available_fields:
+                result["financial_data"][field_name] = {
+                    **format_field_value(field_name, field_value, is_ratio),
+                    "description": field_description,
+                    "available": field_value is not None
+                }
+        
+        # Add data quality metrics
+        result["data_quality"] = {
+            "analysis_type": analysis_type,
+            "fields_requested": len(expected_fields),
+            "fields_available": len(available_fields & expected_fields),
+            "fields_missing": len(expected_fields - available_fields),
+            "completeness_percentage": round((len(available_fields & expected_fields) / len(expected_fields)) * 100, 1) if expected_fields else 100,
             "report_date": str(financial_data.repdte) if financial_data.repdte else None,
-            "profitability_ratios": {
-                "return_on_assets": format_ratio_value(
-                    financial_data.roa if financial_data.roa else calculated_ratios.get("calculated_roa")
-                ),
-                "return_on_equity": format_ratio_value(
-                    financial_data.roe if financial_data.roe else calculated_ratios.get("calculated_roe")
-                ),
-                "net_interest_margin": format_ratio_value(
-                    financial_data.nim if financial_data.nim else calculated_ratios.get("calculated_nim")
-                )
-            },
-            "capital_ratios": {
-                "common_equity_tier1": format_ratio_value(financial_data.cet1r),
-                "tier1_capital": format_ratio_value(financial_data.tier1r),
-                "total_capital": format_ratio_value(financial_data.totcapr)
-            },
-            "efficiency_ratios": {
-                "equity_to_assets": format_ratio_value(calculated_ratios.get("equity_to_assets")),
-                "loans_to_deposits": format_ratio_value(calculated_ratios.get("loans_to_deposits")),
-                "efficiency_ratio": format_ratio_value(calculated_ratios.get("calculated_efficiency"))
-            },
-            "asset_quality": {
-                "nonperforming_loans_ratio": format_ratio_value(financial_data.nptla)
-            },
-            "calculation_methodology": {
-                "fdic_reported_ratios": ["roa", "roe", "nim", "cet1r", "tier1r", "totcapr", "nptla"],
-                "calculated_ratios": list(calculated_ratios.keys()),
-                "data_source": "FDIC BankFind Suite Financial API"
-            },
-            "data_quality": {
-                "fields_available": len(financial_data.get_available_fields()),
-                "ratio_completeness": len([r for r in [financial_data.roa, financial_data.roe, financial_data.nim] if r is not None]),
-                "report_date": str(financial_data.repdte) if financial_data.repdte else None
-            }
+            "total_fields_in_response": len(available_fields)
         }
+        
+        # Add missing fields list if any
+        missing_fields = expected_fields - available_fields
+        if missing_fields:
+            result["data_quality"]["missing_fields"] = list(missing_fields)
+        
+        # Add calculated ratios if available and relevant
+        if hasattr(financial_data, 'calculate_derived_ratios'):
+            calculated_ratios = financial_data.calculate_derived_ratios()
+            if calculated_ratios:
+                result["calculated_metrics"] = {}
+                for ratio_name, ratio_value in calculated_ratios.items():
+                    if ratio_value is not None:
+                        result["calculated_metrics"][ratio_name] = format_field_value(ratio_name, ratio_value, True)
         
         import json
         return json.dumps(result, indent=2)
