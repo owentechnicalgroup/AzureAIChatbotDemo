@@ -9,7 +9,7 @@ This module provides a clean organization of LangChain tools:
 
 # Import production tool collections
 from .atomic import FDICInstitutionSearchTool, FDICFinancialDataTool, RAGSearchTool
-from .composite import BankAnalysisTool
+# BankAnalysisTool has been deprecated in favor of atomic tool composition via agent executor
 from .infrastructure.toolsets import BankingToolset
 
 # Tool management utilities
@@ -27,8 +27,8 @@ __all__ = [
     "FDICFinancialDataTool", 
     "RAGSearchTool",
     
-    # Composite tools
-    "BankAnalysisTool",
+    # Composite tools - deprecated
+    # "BankAnalysisTool",  # Deprecated: Use atomic tools with agent executor
     
     # Infrastructure
     "BankingToolset",

@@ -13,7 +13,6 @@ from src.config.settings import Settings
 from ...atomic.fdic_institution_search_tool import FDICInstitutionSearchTool
 from ...atomic.fdic_financial_data_tool import FDICFinancialDataTool
 from ...atomic.ffiec_call_report_data_tool import FFIECCallReportDataTool
-from ...composite.bank_analysis_tool import BankAnalysisTool
 
 logger = structlog.get_logger(__name__).bind(log_type="SYSTEM")
 
@@ -22,13 +21,13 @@ class BankingToolset:
     """
     Enhanced LangChain-native Banking toolset with real FDIC Financial Data API integration.
     
-    Provides comprehensive banking analysis capabilities using:
+    Provides comprehensive banking analysis capabilities using atomic tools:
     - FDIC BankFind Suite API for institution lookup and verification
-    - FDIC Financial Data API for real-time financial metrics and ratios
-    - Enhanced bank analysis with authoritative regulatory data
+    - FDIC Financial Data API with 24 specialized analysis types for targeted data retrieval
+    - FFIEC Call Report data for official regulatory filings
     
-    All tools properly extend langchain.tools.BaseTool for seamless integration
-    with AI agents and the dynamic tool loading system.
+    Atomic tool architecture allows AI agents to intelligently combine tools
+    rather than using rigid composite workflows, improving performance and flexibility.
     """
     
     def __init__(self, settings: Settings):
@@ -85,19 +84,20 @@ class BankingToolset:
                     has_username=bool(getattr(self.settings, 'ffiec_cdr_username', None))
                 )
             
-            # Keep composite tool for backwards compatibility
-            bank_analysis = BankAnalysisTool()
-            tools.append(bank_analysis)
+            # Composite bank_analysis_tool has been deprecated in favor of direct atomic tool usage
+            # The agent can now intelligently route between fdic_institution_search_tool and 
+            # fdic_financial_data_tool with 24 specialized analysis types for better performance
             
             self._tools = tools
             
             self.logger.info(
-                "Banking tools initialized with FDIC and FFIEC integration",
+                "Atomic banking tools initialized with FDIC and FFIEC integration",
                 tool_count=len(self._tools),
                 tool_names=[tool.name for tool in self._tools],
                 has_fdic_api_key=bool(self.settings.fdic_api_key),
                 has_ffiec_credentials=bool(getattr(self.settings, 'ffiec_cdr_api_key', None)),
-                architecture="atomic_with_composite_compatibility"
+                architecture="atomic_tools_only",
+                composite_tool_deprecated=True
             )
             
         except Exception as e:
@@ -172,7 +172,7 @@ class BankingToolset:
             "fdic_financial_available": fdic_financial_tool.is_available() if fdic_financial_tool else False,
             "fdic_integration": True,
             "has_fdic_api_key": bool(self.settings.fdic_api_key),
-            "toolset_type": "clean_atomic_fdic_tools"
+            "toolset_type": "atomic_fdic_and_ffiec_tools"
         }
     
     def get_schemas(self) -> List[Dict[str, Any]]:
