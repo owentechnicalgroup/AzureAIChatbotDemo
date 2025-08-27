@@ -160,31 +160,27 @@ class ServiceAvailabilityChecker:
     
     async def _check_chromadb_availability(self) -> bool:
         """
-        Check ChromaDB availability for document tools.
-        
-        Follows the existing pattern in chromadb_manager.py.
+        Fast ChromaDB availability check without loading documents.
         """
         try:
-            from src.rag_access.search_service import SearchService
+            # Fast check: just verify ChromaDB can be imported and directory exists
+            import chromadb
+            from pathlib import Path
             
-            # Initialize search service which handles ChromaDB
-            search_service = SearchService(self.settings)
-            
-            # Test basic functionality - check if available
-            is_available = search_service.is_available()
+            # Check if persistence directory exists (indicates setup)
+            persist_dir = Path(self.settings.chromadb_storage_path)
+            has_data = persist_dir.exists() and any(persist_dir.iterdir())
             
             self.logger.debug(
-                "ChromaDB availability check",
-                available=is_available
+                "Fast ChromaDB availability check", 
+                persist_dir_exists=persist_dir.exists(),
+                has_data=has_data
             )
             
-            return is_available
+            return has_data  # Available if directory exists with data
             
-        except ImportError as e:
-            self.logger.warning("ChromaDB not installed", error=str(e))
-            return False
         except Exception as e:
-            self.logger.warning("ChromaDB check failed", error=str(e))
+            self.logger.error("ChromaDB availability check failed", error=str(e))
             return False
     
     

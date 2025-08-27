@@ -246,14 +246,14 @@ class Settings(BaseSettings):
         description="Sampling temperature (0.0 to 2.0)"
     )
     max_tokens: int = Field(
-        1000,
+        4000,
         ge=1,
-        le=4000,
+        le=8000,
         env='AZURE_OPENAI_MAX_TOKENS',
         description="Maximum tokens for response"
     )
     request_timeout: float = Field(
-        30.0,
+        120.0,
         ge=1.0,
         le=300.0,
         env='AZURE_OPENAI_REQUEST_TIMEOUT',

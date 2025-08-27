@@ -8,7 +8,7 @@ Requires RSSD ID from institution search tool.
 import asyncio
 import json
 import xml.etree.ElementTree as ET
-from typing import Optional, Type, Dict, Any
+from typing import Optional, Type, Dict, Any, List
 from datetime import datetime, timezone
 
 import structlog
@@ -35,11 +35,12 @@ class FFIECCallReportDataTool(BaseTool):
     
     Key Features:
     - Direct RSSD-based call report retrieval
-    - FFIEC Discovery API for latest filing detection with quarter-based fallback
+    - FFIEC Discovery API for latest filing detection (primary method)
+    - Simple quarter-based fallback when discovery fails
     - Multiple format support (SDF, XBRL, PDF)
     - Real FFIEC regulatory data
     - Session-based caching for performance
-    - Comprehensive error handling and automatic fallbacks
+    - Comprehensive error handling
     
     Format Options:
     - SDF: Structured Data Format (default - reliable structured data)
@@ -58,43 +59,120 @@ class FFIECCallReportDataTool(BaseTool):
     """
     
     name: str = "ffiec_call_report_data"
-    description: str = """Retrieve and parse FFIEC Call Report and UBPR data for banking institutions with comprehensive analysis.
+    description: str = """Retrieve targeted FFIEC Call Report data with selective schedule-based organization for AI agents.
 
-This enhanced tool retrieves official FFIEC data from the FFIEC CDR Public Data Distribution 
-service and automatically extracts financial information from structured formats.
+⚠️ CRITICAL PERFORMANCE GUIDANCE ⚠️
+ALWAYS specify 'schedules' parameter to avoid data overload! Requesting all schedules returns 200+ financial metrics and causes slow response times. Be strategic about which schedules you need for your specific analysis.
+
+This enhanced tool retrieves official FFIEC data and allows you to specify WHICH schedules to retrieve, preventing data overload and enabling focused financial analysis. If no schedules are specified, returns a summary of available schedules.
 
 Required Input:
 - rssd_id: Bank RSSD identifier (obtained from fdic_institution_search_tool)
 
 Optional Parameters:
 - reporting_period: Specific reporting period (YYYY-MM-DD format) or None for latest available  
-- data_type: 'call_report' for raw regulatory data or 'ubpr' for processed performance ratios (default: call_report)
-- facsimile_format: Output format - SDF, XBRL, or PDF (default: SDF for call reports, XBRL for UBPR)
+- data_type: 'call_report' for comprehensive regulatory data or 'ubpr' for performance ratios (default: call_report)
+- facsimile_format: SDF (structured), XBRL (XML), or PDF (default: SDF for optimal parsing)
+- schedules: List of specific schedules to retrieve (REQUIRED for good performance - only omit to get schedule summary)
 
-Data Types Available:
-1. Call Report Data (raw regulatory filings):
-   - Balance sheet items: Total Assets, Cash, Loans, Securities
-   - Format: SDF (structured), XBRL (XML), or PDF
-   
-2. UBPR Data (Uniform Bank Performance Report):
-   - Performance ratios: ROE, ROA, Net Interest Margin
-   - Capital ratios: Tier 1, Total Capital, Leverage
-   - Asset quality: NPL ratios, Loan loss provisions
-   - Format: XBRL only (processed financial metrics)
+📋 CALL REPORT SCHEDULE GUIDE FOR AI AGENTS:
 
-Use Cases:
-1. Performance Analysis: Get key financial ratios and peer comparisons (UBPR)
-2. Balance Sheet Analysis: Get raw asset and liability data (Call Reports)
-3. Regulatory Compliance: Access official FFIEC filing data
-4. Historical Trending: Compare performance across reporting periods
-5. Risk Assessment: Analyze capital adequacy and asset quality metrics
+⚠️  IMPORTANT: Use these EXACT schedule codes when making requests:
 
-Discovery Method:
-- Primary: FFIEC Discovery API for real-time filing availability
-- Fallback: Quarter-based search for reliability when API is unavailable  
-- UBPR: Extended 8-quarter search (2 years) due to quarterly publication schedule
+🏛️ CAPITAL RATIO SCHEDULES (PRIMARY USE CASE):
+- "RCRI": Regulatory Capital - Contains ALL capital ratios and components
+  • CET1 Ratio: RCON8274 (CET1 Capital), RCON3792 (RWA), RCON7273 (CET1 Ratio)
+  • Tier 1 Ratio: RCON8275 (Tier 1 Capital), RCON3792 (RWA), RCON7274 (Tier 1 Ratio)  
+  • Total Capital Ratio: RCON8276 (Total Capital), RCON3792 (RWA), RCON7275 (Total Capital Ratio)
+- "RCK": Quarterly Averages - Required for Tier 1 Leverage Ratio
+  • Leverage Ratio: RCON8275 (Tier 1 Capital), RCOA3368 (Avg Assets), RCON7204 (Leverage Ratio)
 
-Returns: Structured response with parsed financial data, formatted ratios/amounts, and metadata"""
+🏛️ OTHER BALANCE SHEET SCHEDULES:
+- "RCA": Assets (cash, securities, loans, total assets) 
+- "RCB": Securities (available-for-sale, held-to-maturity)
+- "RCCI": Loans & Leases (loan categories, allowances)
+- "RCE": Deposit Liabilities (demand, savings, time deposits)
+
+💰 INCOME STATEMENT SCHEDULES:
+- "RI": Income Statement (interest income/expense, fees, net income)
+
+🔍 SPECIALIZED SCHEDULES:
+- "RCF": Other Assets, "RCG": Other Liabilities, "RCH": Selected Items
+- "RCL": Derivatives, "RCM": Memoranda, "RCN": Past Due Assets, "RCO": Other Data
+- "RCS": Servicing, Securitization & Asset Sales
+- "RCT": Fiduciary & Related Services
+- "RCV": Variable Interest Entities
+
+📋 SCHEDULE CODE REFERENCE:
+Common Name → Correct Code to Use
+- RC-A → "RCA" (Assets)
+- RC-E → "RCE" (Deposits) 
+- RC-R → "RCRI" (Capital)
+- RC-C → "RCCI" (Loans)
+- RC-B → "RCB" (Securities)
+- RI   → "RI" (Income Statement)
+
+🎯 USAGE EXAMPLES FOR AI AGENTS:
+
+FOR CREDIT ANALYSIS TASKS (like "Create a comprehensive credit analysis for [Bank]"):
+Use this strategic approach - make 2-3 targeted calls instead of one massive call:
+
+🏆 **RECOMMENDED: Comprehensive Credit Analysis** (3 focused calls):
+   Call 1: schedules=["RCA", "RCRI"] → Core balance sheet + capital ratios
+   Call 2: schedules=["RCCI", "RCN"] → Loan portfolio + credit quality  
+   Call 3: schedules=["RI"] → Profitability and earnings
+
+❌ **AVOID: schedules=None** → Returns 200+ metrics, causes 60+ second delays
+
+OTHER ANALYSIS PATTERNS:
+
+1. **Balance Sheet Analysis**: schedules=["RCA", "RCE", "RCRI"] 
+   → Get assets, deposits, and capital for financial position analysis
+
+2. **Credit Risk Assessment**: schedules=["RCCI", "RCN"]
+   → Get loan portfolio and past due assets for credit quality analysis
+
+3. **Profitability Analysis**: schedules=["RI"] 
+   → Get income statement for earnings and margin analysis
+
+4. **Investment Portfolio Review**: schedules=["RCB"]
+   → Get securities holdings for investment risk analysis
+
+5. **Regulatory Capital Review**: schedules=["RCRI"]
+   → Get capital ratios for regulatory compliance analysis
+
+6. **Complete Balance Sheet**: schedules=["RCA", "RCB", "RCCI", "RCE", "RCG", "RCH", "RCRI"]
+   → Get all balance sheet components (use carefully - large data set)
+
+7. **Get Available Schedules**: schedules=None or omit parameter
+   → Returns summary of what schedules are available in the filing (discovery only)
+
+Enhanced JSON Response Structure:
+{
+  "success": true,
+  "requested_schedules": ["RC-A", "RI"],
+  "call_report_schedules": {
+    "RC-A": {
+      "schedule_info": {...},
+      "line_items": [...]
+    },
+    "RI": {
+      "schedule_info": {...}, 
+      "line_items": [...]
+    }
+  },
+  "semantic_mappings": {
+    "total_assets": {"value": 6847388, "formatted_value": "$6.8M"},
+    ...
+  },
+  "summary": {
+    "requested_schedules": 2,
+    "total_line_items": 15,
+    "available_schedules": ["RC-A", "RC-B", "RC-C", "RC-E", "RC-R", "RI"]
+  }
+}
+
+Returns: Targeted JSON with only requested schedule data, semantic mappings, and calculated ratios optimized for focused AI agent financial analysis."""
 
     args_schema: Type[BaseModel] = FFIECCallReportRequest
     
@@ -121,7 +199,7 @@ Returns: Structured response with parsed financial data, formatted ratios/amount
             logger.warning("FFIEC CDR API credentials not configured - tool will not be available")
         
         logger.info("FFIEC Call Report data tool initialized", 
-                   available=self._is_available)
+                   available=self.is_available())
     
     @property
     def ffiec_client(self) -> Optional[FFIECCDRAPIClient]:
@@ -132,12 +210,12 @@ Returns: Structured response with parsed financial data, formatted ratios/amount
         """Check if FFIEC CDR service is available."""
         return getattr(self, '_is_available', False) and self.ffiec_client is not None
     
-    async def _get_most_recent_filing(self, rssd_id: str, max_periods_back: int = 4) -> tuple[Optional[str], Optional[bytes]]:
+    async def _get_most_recent_filing(self, rssd_id: str, max_periods_back: int = 8) -> tuple[Optional[str], Optional[bytes]]:
         """
-        Get the most recent filing by checking recent quarters sequentially.
+        Simple fallback method to find recent filings when FFIEC Discovery API fails.
         
-        More reliable than FFIEC discovery API which can have server errors.
-        Checks the last 4 quarters starting from the most recent completed quarter.
+        Checks standard quarterly reporting periods going backwards from current date.
+        This is a simplified fallback since the FFIEC Discovery API is the primary method.
         
         Args:
             rssd_id: Bank RSSD identifier
@@ -148,50 +226,35 @@ Returns: Structured response with parsed financial data, formatted ratios/amount
         """
         from datetime import date
         
-        logger.info(f"Finding most recent filing using quarter-based search", rssd_id=rssd_id)
+        logger.info(f"Using simple quarter-based fallback search", rssd_id=rssd_id)
         
-        # Calculate most recent completed quarter end
-        # Call reports are filed quarterly: Q1 (Mar 31), Q2 (Jun 30), Q3 (Sep 30), Q4 (Dec 31)
+        # Generate standard quarter end dates going backwards
+        # Q1 (Mar 31), Q2 (Jun 30), Q3 (Sep 30), Q4 (Dec 31)
         today = date.today()
+        current_year = today.year
         
-        # Determine the most recent COMPLETED quarter
-        # Banks typically have 30-70 days after quarter end to file, so be conservative
-        if today.month >= 6 and today.day >= 15:  # Mid-June or later - Q1 definitely filed
-            if today.month >= 9 and today.day >= 15:  # Mid-September or later - Q2 definitely filed  
-                if today.month >= 12 and today.day >= 15:  # Mid-December or later - Q3 definitely filed
-                    latest_quarter = date(today.year, 9, 30)  # Q3 of current year
-                else:
-                    latest_quarter = date(today.year, 6, 30)  # Q2 of current year
-            else:
-                latest_quarter = date(today.year, 3, 31)  # Q1 of current year
-        else:
-            # Before mid-June, assume Q4 of previous year is the latest completed
-            latest_quarter = date(today.year - 1, 12, 31)  # Q4 of previous year
+        # Start with most recent quarters and work backwards
+        quarter_dates = []
+        for year_offset in range(3):  # Check current year and 2 previous years
+            year = current_year - year_offset
+            quarter_dates.extend([
+                date(year, 12, 31),  # Q4
+                date(year, 9, 30),   # Q3
+                date(year, 6, 30),   # Q2
+                date(year, 3, 31),   # Q1
+            ])
         
-        logger.debug(f"Starting search from quarter {latest_quarter}", rssd_id=rssd_id)
+        # Only check quarters that are definitely past (no need for complex filing deadline logic)
+        recent_quarters = [q for q in quarter_dates if q < today][:max_periods_back]
         
-        # Check recent quarters sequentially
-        quarters_to_check = []
-        current_quarter = latest_quarter
-        
-        for i in range(max_periods_back):
-            quarters_to_check.append(current_quarter)
-            
-            # Calculate previous quarter end date properly
-            if current_quarter.month == 12:  # Q4 -> Q3
-                current_quarter = date(current_quarter.year, 9, 30)
-            elif current_quarter.month == 9:  # Q3 -> Q2  
-                current_quarter = date(current_quarter.year, 6, 30)
-            elif current_quarter.month == 6:  # Q2 -> Q1
-                current_quarter = date(current_quarter.year, 3, 31)
-            elif current_quarter.month == 3:  # Q1 -> Q4 of previous year
-                current_quarter = date(current_quarter.year - 1, 12, 31)
-        
-        for period_date in quarters_to_check:
-            period_str = period_date.strftime("%Y-%m-%d")
+        for quarter_date in recent_quarters:
+            period_str = quarter_date.strftime("%Y-%m-%d")
             
             try:
                 logger.debug(f"Checking period {period_str}", rssd_id=rssd_id)
+                
+                if not self.ffiec_client:
+                    raise ValueError("FFIEC client not initialized")
                 
                 filing_data = await self.ffiec_client.retrieve_facsimile(
                     rssd_id=rssd_id,
@@ -557,18 +620,21 @@ Returns: Structured response with parsed financial data, formatted ratios/amount
                 }
             }
     
-    def _parse_sdf_data(self, sdf_data: bytes, rssd_id: str = None) -> Dict[str, Any]:
+    def _parse_sdf_data(self, sdf_data: bytes, rssd_id: Optional[str] = None, requested_schedules: Optional[List[str]] = None) -> Dict[str, Any]:
         """
-        Parse SDF (Structured Data Format) to extract balance sheet information.
+        Parse SDF (Structured Data Format) with selective schedule-based organization.
         
-        SDF is typically a tab-delimited or pipe-delimited format used by FFIEC
-        for structured call report data.
+        Enhanced dynamic parser that captures specified MDRM codes from requested Call Report schedules
+        and organizes them by regulatory schedule (RC-A, RC-B, RC-C, RC-E, RC-R, RI, etc.)
+        for optimal AI agent consumption and targeted financial analysis.
         
         Args:
             sdf_data: Raw SDF data as bytes
+            rssd_id: Optional RSSD ID for validation
+            requested_schedules: List of schedules to include (if None, returns all schedules)
             
         Returns:
-            Dictionary containing parsed balance sheet data
+            Dictionary containing comprehensive call report data organized by schedule
         """
         try:
             # Decode the SDF data
@@ -587,119 +653,504 @@ Returns: Structured response with parsed financial data, formatted ratios/amount
                 sdf_str = sdf_data.decode('utf-8', errors='replace')
                 logger.warning("SDF decoded with error replacement - some characters may be corrupted")
             
-            balance_sheet_data = {}
-            lines = sdf_str.split('\n')
+            # Initialize comprehensive data structure
+            call_report_data = {}
+            metadata: Dict[str, Any] = {}
             
-            # Based on test data, SDF format is semicolon-delimited with headers:
-            # Call Date;Bank RSSD Identifier;MDRM #;Value;Last Update;Short Definition;Call Schedule;Line Number
-            
-            # Look for common call report MDRM codes for balance sheet items
-            balance_sheet_mdrm_codes = {
-                # Total Assets 
-                'RCFD2170': 'total_assets',  # Total Assets
-                'RCON2170': 'total_assets',  # Total Assets (consolidated)
-                'RCFA2170': 'total_assets',  # Total Assets (alternative)
-                
-                # Cash and Cash Equivalents
-                'RCFD0010': 'cash_and_equivalents',  # Cash and balances due from depository institutions
-                'RCON0010': 'cash_and_equivalents',
-                'RCFA0010': 'cash_and_equivalents',
-                
-                # Loans
-                'RCFD1400': 'total_loans',  # Total loans and lease financing receivables
-                'RCON1400': 'total_loans',
-                'RCFA1400': 'total_loans',
-                'RCFD2122': 'total_loans_net',  # Total loans net of unearned income and allowances
-                'RCON2122': 'total_loans_net',
-                
-                # Securities
-                'RCFD1773': 'securities',  # Total securities
-                'RCON1773': 'securities',
-                'RCFA1773': 'securities',
-                'RCFD1754': 'securities_afs',  # Available-for-sale securities
-                'RCFD1771': 'securities_htm',  # Held-to-maturity securities
+            # Schedule metadata with comprehensive descriptions using actual FFIEC codes
+            schedule_descriptions = {
+                'RCA': {
+                    'name': 'Balance Sheet - Assets',
+                    'category': 'balance_sheet',
+                    'description': 'Cash, securities, loans, and other assets'
+                },
+                'RCB': {
+                    'name': 'Securities',
+                    'category': 'balance_sheet',
+                    'description': 'Investment securities portfolio details'
+                },
+                'RCCI': {
+                    'name': 'Loans and Lease Financing Receivables',
+                    'category': 'balance_sheet',
+                    'description': 'Loan portfolio composition and quality'
+                },
+                'RCD': {
+                    'name': 'Trading Assets and Liabilities',
+                    'category': 'balance_sheet',
+                    'description': 'Trading account assets and liabilities'
+                },
+                'RCE': {
+                    'name': 'Deposit Liabilities',
+                    'category': 'balance_sheet',
+                    'description': 'Customer deposits and funding sources'
+                },
+                'RCF': {
+                    'name': 'Other Assets',
+                    'category': 'balance_sheet',
+                    'description': 'Premises, goodwill, and other assets'
+                },
+                'RCG': {
+                    'name': 'Other Liabilities',
+                    'category': 'balance_sheet',
+                    'description': 'Subordinated debt and other liabilities'
+                },
+                'RCH': {
+                    'name': 'Selected Balance Sheet Items',
+                    'category': 'balance_sheet',
+                    'description': 'Additional balance sheet detail'
+                },
+                'RCK': {
+                    'name': 'Quarterly Averages',
+                    'category': 'balance_sheet',
+                    'description': 'Average balances for ratio calculations'
+                },
+                'RCL': {
+                    'name': 'Derivatives & Off-Balance Sheet',
+                    'category': 'balance_sheet',
+                    'description': 'Trading assets, commitments, and off-balance sheet items'
+                },
+                'RCM': {
+                    'name': 'Memoranda',
+                    'category': 'balance_sheet',
+                    'description': 'Supplemental asset/liability details'
+                },
+                'RCN': {
+                    'name': 'Past Due Assets',
+                    'category': 'balance_sheet',
+                    'description': 'Nonperforming loans and charge-offs'
+                },
+                'RCO': {
+                    'name': 'Other Data',
+                    'category': 'other',
+                    'description': 'Employees, offices, fiduciary activities'
+                },
+                'RCRI': {
+                    'name': 'Regulatory Capital',
+                    'category': 'balance_sheet',
+                    'description': 'Capital adequacy and regulatory ratios'
+                },
+                'RCS': {
+                    'name': 'Servicing, Securitization & Asset Sales',
+                    'category': 'other',
+                    'description': 'Mortgage servicing and securitization activities'
+                },
+                'RCT': {
+                    'name': 'Fiduciary & Related Services',
+                    'category': 'other',
+                    'description': 'Trust and fiduciary service activities'
+                },
+                'RCV': {
+                    'name': 'Variable Interest Entities',
+                    'category': 'other',
+                    'description': 'Variable interest entity disclosures'
+                },
+                'RI': {
+                    'name': 'Income Statement',
+                    'category': 'income_statement',
+                    'description': 'Revenue, expenses, and profitability metrics'
+                },
+                'RIA': {
+                    'name': 'Changes in Bank Equity Capital',
+                    'category': 'income_statement',
+                    'description': 'Changes in equity capital during the period'
+                },
+                # Legacy mappings for backward compatibility
+                'RC-A': {
+                    'name': 'Balance Sheet - Assets (Legacy Code)',
+                    'category': 'balance_sheet',
+                    'description': 'Use "RCA" instead of "RC-A"'
+                },
+                'RC-E': {
+                    'name': 'Deposit Liabilities (Legacy Code)',
+                    'category': 'balance_sheet',
+                    'description': 'Use "RCE" instead of "RC-E"'
+                },
+                'RC-R': {
+                    'name': 'Regulatory Capital (Legacy Code)',
+                    'category': 'balance_sheet',
+                    'description': 'Use "RCRI" instead of "RC-R"'
+                }
             }
             
-            # Parse semicolon-delimited SDF data
+            lines = sdf_str.split('\n')
+            logger.info(f"Processing SDF with {len(lines)} lines")
+            
+            # Parse semicolon-delimited SDF data dynamically
             header_found = False
             data_rows = 0
+            total_elements = 0
             
-            for line in lines:
+            for line_num, line in enumerate(lines, 1):
                 line = line.strip()
                 if not line:
                     continue
                 
-                # Check if this is the header line
-                if 'Call Date;Bank RSSD Identifier;MDRM' in line or 'MDRM #;Value' in line:
-                    header_found = True
-                    logger.debug("Found SDF header line", line_preview=line[:100])
-                    continue
-                
-                if not header_found:
-                    continue
-                
-                # Split by semicolon
-                if ';' in line:
-                    parts = [p.strip() for p in line.split(';')]
-                    if len(parts) >= 4:  # Need at least: Date, RSSD, MDRM, Value
+                # Handle MDRM lines directly (tab-delimited format)
+                if line.startswith('MDRM\t') or line.startswith('RIAD'):
+                    # Split by tabs for MDRM format
+                    parts = [p.strip() for p in line.split('\t')]
+                    if len(parts) >= 6:  # MDRM format: Type, MDRM_Code, Schedule, Description, Value, Date
                         data_rows += 1
                         
                         try:
-                            # SDF format: Call Date;Bank RSSD Identifier;MDRM #;Value;...
+                            # MDRM format: MDRM	RCON2170	RC-A	Total assets	9500000000	20230630
+                            record_type = parts[0] if len(parts) > 0 else ''
+                            mdrm_code = parts[1].upper() if len(parts) > 1 else ''
+                            call_schedule = parts[2] if len(parts) > 2 else ''
+                            short_definition = parts[3] if len(parts) > 3 else ''
+                            value_str = parts[4] if len(parts) > 4 else ''
+                            call_date = parts[5] if len(parts) > 5 else ''
+                            
+                            # Skip if specific schedules requested and this isn't one of them
+                            if requested_schedules is not None and call_schedule not in requested_schedules:
+                                continue
+                            
+                            # Convert value to number
+                            try:
+                                value = float(value_str.replace(',', '').replace('$', '').strip()) if value_str else 0.0
+                                formatted_value = self._format_currency(value) if value != 0 else "$0"
+                            except (ValueError, TypeError):
+                                value = value_str
+                                formatted_value = value_str
+                            
+                            # Initialize schedule if not exists
+                            if call_schedule not in call_report_data:
+                                call_report_data[call_schedule] = {
+                                    'schedule_info': schedule_descriptions.get(call_schedule, {
+                                        'name': call_schedule,
+                                        'category': 'other',
+                                        'description': f'Call Report schedule {call_schedule}'
+                                    }),
+                                    'line_items': []
+                                }
+                            
+                            # Create comprehensive line item
+                            line_item = {
+                                'mdrm_code': mdrm_code,
+                                'short_definition': short_definition,
+                                'value': value,
+                                'formatted_value': formatted_value,
+                                'call_date': call_date
+                            }
+                            
+                            call_report_data[call_schedule]['line_items'].append(line_item)
+                            total_elements += 1
+                            
+                            # Store metadata from first line
+                            if not metadata:
+                                metadata = {
+                                    'call_date': call_date,
+                                    'parsing_timestamp': datetime.now(timezone.utc).isoformat()
+                                }
+                            
+                            logger.debug(f"Captured {mdrm_code} in {call_schedule}: {short_definition} = {formatted_value}")
+                        
+                        except Exception as row_error:
+                            logger.debug(f"Error parsing MDRM row {line_num}", error=str(row_error), line_preview=line[:100])
+                            continue
+                    continue
+                
+                # Check for legacy semicolon-delimited format 
+                if 'Call Date;Bank RSSD Identifier;MDRM' in line or 'MDRM #;Value' in line:
+                    header_found = True
+                    logger.debug("Found SDF header line", line_number=line_num, line_preview=line[:100])
+                    continue
+                
+                # Handle semicolon-delimited format (fallback)
+                if header_found and ';' in line:
+                    parts = [p.strip() for p in line.split(';')]
+                    if len(parts) >= 7:  # Need all fields: Date, RSSD, MDRM, Value, Update, Definition, Schedule
+                        data_rows += 1
+                        
+                        try:
+                            # SDF format: Call Date;Bank RSSD Identifier;MDRM #;Value;Last Update;Short Definition;Call Schedule;Line Number
                             call_date = parts[0] if len(parts) > 0 else ''
                             rssd_id_check = parts[1] if len(parts) > 1 else ''
                             mdrm_code = parts[2].upper() if len(parts) > 2 else ''
                             value_str = parts[3] if len(parts) > 3 else ''
+                            last_update = parts[4] if len(parts) > 4 else ''
+                            short_definition = parts[5] if len(parts) > 5 else ''
+                            call_schedule = parts[6] if len(parts) > 6 else ''
+                            line_number = parts[7] if len(parts) > 7 else ''
                             
-                            # Verify this is the right bank
-                            if rssd_id_check and rssd_id_check != rssd_id:
+                            # Skip if specific schedules requested and this isn't one of them
+                            if requested_schedules is not None and call_schedule not in requested_schedules:
                                 continue
                             
-                            # Check if this MDRM code is one we want
-                            if mdrm_code in balance_sheet_mdrm_codes:
-                                field_name = balance_sheet_mdrm_codes[mdrm_code]
-                                
-                                try:
-                                    # Parse the value (already in actual dollars, not thousands)
-                                    clean_value = value_str.replace(',', '').replace('$', '').strip()
-                                    if clean_value and clean_value != '0' and clean_value != '':
-                                        value = float(clean_value)
-                                        
-                                        # Only update if we haven't found this field yet (prefer first occurrence)
-                                        if field_name not in balance_sheet_data:
-                                            balance_sheet_data[field_name] = value
-                                            balance_sheet_data[f"{field_name}_formatted"] = self._format_currency(value)
-                                            logger.debug(f"Found {field_name}: {clean_value} -> {value}", 
-                                                       mdrm_code=mdrm_code, call_date=call_date)
-                                
-                                except (ValueError, TypeError) as parse_error:
-                                    logger.debug(f"Could not parse value for {mdrm_code}: {value_str}", error=str(parse_error))
-                                    continue
+                            # Verify this is the right bank
+                            if rssd_id and rssd_id_check != rssd_id:
+                                continue
+                            
+                            # Convert value to number
+                            try:
+                                value = float(value_str.replace(',', '').replace('$', '').strip()) if value_str else 0.0
+                                formatted_value = self._format_currency(value) if value != 0 else "$0"
+                            except (ValueError, TypeError):
+                                value = value_str
+                                formatted_value = value_str
+                            
+                            # Initialize schedule if not exists
+                            if call_schedule not in call_report_data:
+                                call_report_data[call_schedule] = {
+                                    'schedule_info': schedule_descriptions.get(call_schedule, {
+                                        'name': call_schedule,
+                                        'category': 'other',
+                                        'description': f'Call Report schedule {call_schedule}'
+                                    }),
+                                    'line_items': []
+                                }
+                            
+                            # Create comprehensive line item
+                            line_item = {
+                                'mdrm_code': mdrm_code,
+                                'line_number': line_number,
+                                'short_definition': short_definition,
+                                'value': value,
+                                'formatted_value': formatted_value,
+                                'last_update': last_update
+                            }
+                            
+                            call_report_data[call_schedule]['line_items'].append(line_item)
+                            total_elements += 1
+                            
+                            # Store metadata from first line
+                            if not metadata:
+                                metadata = {
+                                    'rssd_id': rssd_id_check,
+                                    'call_date': call_date,
+                                    'parsing_timestamp': datetime.now(timezone.utc).isoformat()
+                                }
+                            
+                            logger.debug(f"Captured {mdrm_code} in {call_schedule}: {short_definition} = {formatted_value}")
                         
                         except Exception as row_error:
-                            logger.debug(f"Error parsing SDF row", error=str(row_error), line_preview=line[:100])
+                            logger.debug(f"Error parsing SDF row {line_num}", error=str(row_error), line_preview=line[:100])
                             continue
             
-            # Add metadata
-            balance_sheet_data['parsing_successful'] = True
-            balance_sheet_data['elements_found'] = len([k for k in balance_sheet_data.keys() 
-                                                      if not k.endswith('_formatted') and k not in ['parsing_successful', 'elements_found', 'format_used', 'data_rows_processed']])
-            balance_sheet_data['format_used'] = 'SDF'
-            balance_sheet_data['data_rows_processed'] = data_rows
+            # Calculate summary statistics
+            metadata['total_line_items'] = total_elements
+            metadata['schedules_included'] = list(call_report_data.keys())
+            metadata['data_rows_processed'] = data_rows
             
-            logger.info("SDF parsing completed", 
-                       elements_found=balance_sheet_data.get('elements_found', 0),
-                       data_rows_processed=balance_sheet_data.get('data_rows_processed', 0))
+            # Generate semantic field mappings for AI agents
+            semantic_mappings = self._generate_semantic_mappings(call_report_data)
             
-            return balance_sheet_data
+            # Check if this is a summary request (no specific schedules requested)
+            if requested_schedules is None:
+                # Return a summary of available schedules instead of full data
+                available_schedules = {}
+                for schedule_code, schedule_data in call_report_data.items():
+                    available_schedules[schedule_code] = {
+                        'schedule_info': schedule_data['schedule_info'],
+                        'line_item_count': len(schedule_data['line_items']),
+                        'sample_items': schedule_data['line_items'][:3] if schedule_data['line_items'] else []
+                    }
+                
+                summary_data = {
+                    'parsing_successful': True,
+                    'format_used': 'SDF_SCHEDULE_SUMMARY',
+                    'metadata': metadata,
+                    'summary_mode': True,
+                    'available_schedules': available_schedules,
+                    'schedule_guide': {
+                        'balance_sheet': ['RCA', 'RCB', 'RCCI', 'RCE', 'RCG', 'RCH', 'RCRI'],
+                        'income_statement': ['RI'],
+                        'specialized': ['RCK', 'RCL', 'RCM', 'RCN', 'RCO', 'RCS', 'RCT', 'RCV']
+                    },
+                    'usage_examples': {
+                        'balance_sheet_analysis': 'schedules=["RCA", "RCE", "RCRI"]',
+                        'credit_risk_assessment': 'schedules=["RCCI", "RCN"]',
+                        'profitability_analysis': 'schedules=["RI"]',
+                        'investment_review': 'schedules=["RCB"]'
+                    },
+                    'summary': {
+                        'total_schedules_available': len(call_report_data),
+                        'total_line_items_available': total_elements,
+                        'balance_sheet_schedules': [k for k, v in call_report_data.items() 
+                                                  if v['schedule_info'].get('category') == 'balance_sheet'],
+                        'income_statement_schedules': [k for k, v in call_report_data.items() 
+                                                     if v['schedule_info'].get('category') == 'income_statement'],
+                        'other_schedules': [k for k, v in call_report_data.items() 
+                                          if v['schedule_info'].get('category') == 'other']
+                    }
+                }
+                
+                logger.info("Schedule summary completed", 
+                           schedules_available=len(call_report_data),
+                           total_items=total_elements)
+                
+                return summary_data
+            
+            # Create comprehensive response structure for specific schedules
+            comprehensive_data = {
+                'parsing_successful': True,
+                'format_used': 'SDF_DYNAMIC_SCHEDULE_GROUPED',
+                'metadata': metadata,
+                'requested_schedules': requested_schedules or list(call_report_data.keys()),
+                'call_report_schedules': call_report_data,
+                'semantic_mappings': semantic_mappings,
+                'summary': {
+                    'requested_schedules': len(requested_schedules) if requested_schedules else len(call_report_data),
+                    'total_line_items': total_elements,
+                    'available_schedules': list(call_report_data.keys()),
+                    'balance_sheet_schedules': [k for k, v in call_report_data.items() 
+                                              if v['schedule_info'].get('category') == 'balance_sheet'],
+                    'income_statement_schedules': [k for k, v in call_report_data.items() 
+                                                 if v['schedule_info'].get('category') == 'income_statement'],
+                    'other_schedules': [k for k, v in call_report_data.items() 
+                                      if v['schedule_info'].get('category') == 'other']
+                }
+            }
+            
+            logger.info("Enhanced SDF parsing completed", 
+                       total_elements=total_elements,
+                       schedules_parsed=len(call_report_data),
+                       requested_schedules=len(requested_schedules) if requested_schedules else "all",
+                       data_rows_processed=data_rows,
+                       semantic_fields=len(semantic_mappings))
+            
+            return comprehensive_data
             
         except Exception as e:
-            logger.error("SDF parsing failed", error=str(e))
+            logger.error("Enhanced SDF parsing failed", error=str(e))
             return {
                 'parsing_successful': False,
-                'error': f"SDF parsing error: {str(e)}",
-                'format_used': 'SDF'
+                'error': f"Enhanced SDF parsing error: {str(e)}",
+                'format_used': 'SDF_DYNAMIC_SCHEDULE_GROUPED'
             }
+    
+    def _generate_semantic_mappings(self, call_report_data: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Generate semantic field mappings for AI agents from call report data.
+        
+        Args:
+            call_report_data: Parsed call report data organized by schedule
+            
+        Returns:
+            Dictionary of semantic field mappings for key financial metrics
+        """
+        semantic_mappings = {}
+        
+        try:
+            # Iterate through all schedules and line items
+            for schedule_id, schedule in call_report_data.items():
+                for item in schedule.get('line_items', []):
+                    definition = item.get('short_definition', '').lower()
+                    mdrm_code = item.get('mdrm_code', '')
+                    value = item.get('value', 0)
+                    formatted_value = item.get('formatted_value', '')
+                    
+                    # Semantic mapping rules for key financial metrics
+                    if 'total assets' in definition and 'consolidated' not in definition:
+                        semantic_mappings['total_assets'] = {
+                            'value': value,
+                            'formatted_value': formatted_value,
+                            'mdrm_code': mdrm_code,
+                            'schedule': schedule_id
+                        }
+                    elif 'total deposits' in definition:
+                        semantic_mappings['total_deposits'] = {
+                            'value': value,
+                            'formatted_value': formatted_value,
+                            'mdrm_code': mdrm_code,
+                            'schedule': schedule_id
+                        }
+                    elif 'total equity capital' in definition:
+                        semantic_mappings['total_equity'] = {
+                            'value': value,
+                            'formatted_value': formatted_value,
+                            'mdrm_code': mdrm_code,
+                            'schedule': schedule_id
+                        }
+                    elif 'interest income' in definition and 'net' not in definition and 'after' not in definition:
+                        semantic_mappings['interest_income'] = {
+                            'value': value,
+                            'formatted_value': formatted_value,
+                            'mdrm_code': mdrm_code,
+                            'schedule': schedule_id
+                        }
+                    elif 'interest expense' in definition:
+                        semantic_mappings['interest_expense'] = {
+                            'value': value,
+                            'formatted_value': formatted_value,
+                            'mdrm_code': mdrm_code,
+                            'schedule': schedule_id
+                        }
+                    elif 'net interest income' in definition and 'after' not in definition:
+                        semantic_mappings['net_interest_income'] = {
+                            'value': value,
+                            'formatted_value': formatted_value,
+                            'mdrm_code': mdrm_code,
+                            'schedule': schedule_id
+                        }
+                    elif 'provision for loan losses' in definition or 'provision for credit losses' in definition:
+                        semantic_mappings['credit_loss_provision'] = {
+                            'value': value,
+                            'formatted_value': formatted_value,
+                            'mdrm_code': mdrm_code,
+                            'schedule': schedule_id
+                        }
+                    elif 'net income' in definition and 'interest' not in definition and 'applicable' not in definition:
+                        semantic_mappings['net_income'] = {
+                            'value': value,
+                            'formatted_value': formatted_value,
+                            'mdrm_code': mdrm_code,
+                            'schedule': schedule_id
+                        }
+                    elif 'total loans' in definition and 'net' not in definition:
+                        semantic_mappings['total_loans'] = {
+                            'value': value,
+                            'formatted_value': formatted_value,
+                            'mdrm_code': mdrm_code,
+                            'schedule': schedule_id
+                        }
+                    elif 'total securities' in definition:
+                        semantic_mappings['total_securities'] = {
+                            'value': value,
+                            'formatted_value': formatted_value,
+                            'mdrm_code': mdrm_code,
+                            'schedule': schedule_id
+                        }
+                    elif 'cash and balances' in definition:
+                        semantic_mappings['cash_and_equivalents'] = {
+                            'value': value,
+                            'formatted_value': formatted_value,
+                            'mdrm_code': mdrm_code,
+                            'schedule': schedule_id
+                        }
+            
+            # Calculate derived financial ratios if we have the base metrics
+            if 'total_equity' in semantic_mappings and 'total_assets' in semantic_mappings:
+                equity_ratio = (semantic_mappings['total_equity']['value'] / semantic_mappings['total_assets']['value']) * 100
+                semantic_mappings['equity_to_assets_ratio'] = {
+                    'value': equity_ratio,
+                    'formatted_value': f"{equity_ratio:.2f}%",
+                    'calculation': 'total_equity / total_assets * 100',
+                    'category': 'calculated_ratio'
+                }
+            
+            if 'total_deposits' in semantic_mappings and 'total_assets' in semantic_mappings:
+                deposit_ratio = (semantic_mappings['total_deposits']['value'] / semantic_mappings['total_assets']['value']) * 100
+                semantic_mappings['deposits_to_assets_ratio'] = {
+                    'value': deposit_ratio,
+                    'formatted_value': f"{deposit_ratio:.2f}%",
+                    'calculation': 'total_deposits / total_assets * 100',
+                    'category': 'calculated_ratio'
+                }
+            
+            if 'net_interest_income' in semantic_mappings and 'total_assets' in semantic_mappings:
+                nim = (semantic_mappings['net_interest_income']['value'] / semantic_mappings['total_assets']['value']) * 100
+                semantic_mappings['net_interest_margin'] = {
+                    'value': nim,
+                    'formatted_value': f"{nim:.2f}%",
+                    'calculation': 'net_interest_income / total_assets * 100',
+                    'category': 'calculated_ratio'
+                }
+            
+        except Exception as e:
+            logger.warning("Error generating semantic mappings", error=str(e))
+        
+        return semantic_mappings
     
     def _parse_ubpr_xbrl_data(self, ubpr_data: bytes) -> Dict[str, Any]:
         """
@@ -915,6 +1366,8 @@ Returns: Structured response with parsed financial data, formatted ratios/amount
              reporting_period: Optional[str] = None,
              facsimile_format: str = "SDF",
              data_type: str = "call_report",
+             schedules: Optional[List[str]] = None,
+             specific_fields: Optional[List[str]] = None,
              run_manager: Optional[CallbackManagerForToolRun] = None) -> str:
         """Synchronous wrapper for async call report retrieval."""
         try:
@@ -926,29 +1379,33 @@ Returns: Structured response with parsed financial data, formatted ratios/amount
                 with concurrent.futures.ThreadPoolExecutor() as executor:
                     future = executor.submit(
                         asyncio.run,
-                        self._arun(rssd_id, reporting_period, facsimile_format, data_type, None)
+                        self._arun(rssd_id, reporting_period, facsimile_format, data_type, schedules, specific_fields, None)
                     )
                     return future.result()
             else:
                 # Loop exists but not running, we can use asyncio.run
-                return asyncio.run(self._arun(rssd_id, reporting_period, facsimile_format, data_type, None))
+                return asyncio.run(self._arun(rssd_id, reporting_period, facsimile_format, data_type, schedules, specific_fields, None))
         except RuntimeError:
             # No event loop, safe to use asyncio.run
-            return asyncio.run(self._arun(rssd_id, reporting_period, facsimile_format, data_type, None))
+            return asyncio.run(self._arun(rssd_id, reporting_period, facsimile_format, data_type, schedules, specific_fields, None))
     
     async def _arun(self,
                    rssd_id: str,
                    reporting_period: Optional[str] = None,
                    facsimile_format: str = "SDF",
                    data_type: str = "call_report",
+                   schedules: Optional[List[str]] = None,
+                   specific_fields: Optional[List[str]] = None,
                    run_manager: Optional[AsyncCallbackManagerForToolRun] = None) -> str:
         """
-        Retrieve FFIEC Call Report data for a bank.
+        Retrieve FFIEC Call Report data for a bank with selective schedule filtering.
         
         Args:
             rssd_id: Bank RSSD identifier
             reporting_period: Specific reporting period or None for latest
             facsimile_format: Format type (PDF, XBRL, SDF)
+            data_type: Type of data to retrieve (call_report or ubpr)
+            schedules: List of specific schedules to retrieve (if None, returns summary)
             run_manager: LangChain callback manager
             
         Returns:
@@ -981,7 +1438,8 @@ Returns: Structured response with parsed financial data, formatted ratios/amount
                 rssd_id=rssd_id,
                 reporting_period=reporting_period,
                 facsimile_format=facsimile_format,
-                data_type=data_type
+                data_type=data_type,
+                schedules=schedules
             )
             
             logger.info(
@@ -1000,11 +1458,20 @@ Returns: Structured response with parsed financial data, formatted ratios/amount
             if not actual_period:
                 logger.debug(f"Finding most recent {data_type} filing using FFIEC Discovery API", rssd_id=rssd_id)
                 
+                if not self.ffiec_client:
+                    return self._format_error(
+                        "FFIEC client not initialized - check configuration",
+                        error_code="CLIENT_NOT_INITIALIZED"
+                    )
+                
+                # Now we know ffiec_client is not None
+                client = self.ffiec_client
+                
                 # Choose discovery method based on data type
                 if data_type == "ubpr":
-                    discovered_period = await self.ffiec_client.discover_latest_ubpr_filing(rssd_id)
+                    discovered_period = await client.discover_latest_ubpr_filing(rssd_id)
                 else:
-                    discovered_period = await self.ffiec_client.discover_latest_filing(rssd_id)
+                    discovered_period = await client.discover_latest_filing(rssd_id)
                 
                 if not discovered_period:
                     logger.warning("FFIEC Discovery API failed, falling back to quarter-based search", rssd_id=rssd_id)
@@ -1042,25 +1509,33 @@ Returns: Structured response with parsed financial data, formatted ratios/amount
                     
                     # Retrieve data for discovered period based on data type
                     if data_type == "ubpr":
-                        call_report_data = await self.ffiec_client.retrieve_ubpr_facsimile(
+                        call_report_data = await client.retrieve_ubpr_facsimile(
                             rssd_id=rssd_id,
                             reporting_period=actual_period
                         )
                     else:
-                        call_report_data = await self.ffiec_client.retrieve_facsimile(
+                        call_report_data = await client.retrieve_facsimile(
                             rssd_id=rssd_id,
                             reporting_period=actual_period,
                             format_type=facsimile_format.upper()
                         )
             else:
                 # Retrieve data for specified period based on data type
+                if not self.ffiec_client:
+                    return self._format_error(
+                        "FFIEC client not initialized - check configuration",
+                        error_code="CLIENT_NOT_INITIALIZED"
+                    )
+                
+                client = self.ffiec_client
+                
                 if data_type == "ubpr":
-                    call_report_data = await self.ffiec_client.retrieve_ubpr_facsimile(
+                    call_report_data = await client.retrieve_ubpr_facsimile(
                         rssd_id=rssd_id,
                         reporting_period=actual_period
                     )
                 else:
-                    call_report_data = await self.ffiec_client.retrieve_facsimile(
+                    call_report_data = await client.retrieve_facsimile(
                         rssd_id=rssd_id,
                         reporting_period=actual_period,
                         format_type=facsimile_format.upper()
@@ -1081,7 +1556,7 @@ Returns: Structured response with parsed financial data, formatted ratios/amount
                 parsed_data = self._parse_ubpr_xbrl_data(call_report_data)
             elif facsimile_format.upper() == "SDF":
                 logger.info("Parsing SDF data for balance sheet extraction", rssd_id=rssd_id)
-                parsed_data = self._parse_sdf_data(call_report_data, rssd_id)
+                parsed_data = self._parse_sdf_data(call_report_data, rssd_id, schedules)
                 
                 # If SDF parsing failed completely, try XBRL format as fallback
                 if parsed_data and not parsed_data.get("parsing_successful", False):
@@ -1120,7 +1595,7 @@ Returns: Structured response with parsed financial data, formatted ratios/amount
                         )
                         if sdf_data:
                             logger.info("Successfully retrieved SDF format, parsing...", rssd_id=rssd_id)
-                            sdf_parsed_data = self._parse_sdf_data(sdf_data, rssd_id)
+                            sdf_parsed_data = self._parse_sdf_data(sdf_data, rssd_id, schedules)
                             if sdf_parsed_data and sdf_parsed_data.get("parsing_successful", False):
                                 parsed_data = sdf_parsed_data
                                 # Update format type to reflect what was actually used
@@ -1132,6 +1607,10 @@ Returns: Structured response with parsed financial data, formatted ratios/amount
             
             # Calculate execution time
             execution_time = (datetime.now(timezone.utc) - start_time).total_seconds()
+            
+            # Apply field filtering if requested
+            if specific_fields and parsed_data:
+                parsed_data = self._filter_specific_fields(parsed_data, specific_fields)
             
             # Format successful response with parsed data
             return self._format_success(
@@ -1235,6 +1714,20 @@ Returns: Structured response with parsed financial data, formatted ratios/amount
         
         # Add parsed balance sheet data if available
         if parsed_data:
+            # If parsed_data contains selective schedule data, return it directly to prevent data overload
+            if (parsed_data.get("format_used") in ["SDF_DYNAMIC_SCHEDULE_GROUPED", "SDF_SCHEDULE_SUMMARY"] and 
+                (parsed_data.get("requested_schedules") or parsed_data.get("summary_mode"))):
+                # Return the selective schedule data directly - this is what AI agents need
+                logger.info(
+                    "Returning selective schedule data directly to AI agent",
+                    requested_schedules=parsed_data.get("requested_schedules"),
+                    summary_mode=parsed_data.get("summary_mode", False),
+                    schedules_count=len(parsed_data.get("call_report_schedules", {})),
+                    total_items=parsed_data.get("metadata", {}).get("total_line_items", 0)
+                )
+                return json.dumps(parsed_data, indent=2)
+            
+            # Legacy format for non-selective data
             response["balance_sheet_data"] = parsed_data
             
             # Add summary if parsing was successful
@@ -1254,6 +1747,69 @@ Returns: Structured response with parsed financial data, formatted ratios/amount
                 response["balance_sheet_parsing_error"] = parsed_data.get("error", "Unknown parsing error")
         
         return json.dumps(response, indent=2)
+    
+    def _filter_specific_fields(self, parsed_data: Dict[str, Any], specific_fields: List[str]) -> Dict[str, Any]:
+        """
+        Filter parsed data to only include specific RCON/RCOA field codes.
+        
+        Args:
+            parsed_data: Full parsed call report data
+            specific_fields: List of field codes to extract (e.g., ['RCON8274', 'RCON7273'])
+            
+        Returns:
+            Filtered data with only requested fields
+        """
+        if not specific_fields or not parsed_data:
+            return parsed_data
+        
+        filtered_data = {
+            "success": True,
+            "filtered_fields": True,
+            "requested_fields": specific_fields,
+            "capital_ratios": {},
+            "metadata": parsed_data.get("metadata", {})
+        }
+        
+        # Define capital ratio field mappings
+        field_mappings = {
+            "RCON8274": {"name": "Common Equity Tier 1 Capital", "type": "amount"},
+            "RCON8275": {"name": "Tier 1 Capital", "type": "amount"}, 
+            "RCON8276": {"name": "Total Capital", "type": "amount"},
+            "RCON3792": {"name": "Risk-Weighted Assets", "type": "amount"},
+            "RCOA3368": {"name": "Average Total Consolidated Assets", "type": "amount"},
+            "RCON7273": {"name": "Common Equity Tier 1 Capital Ratio", "type": "ratio"},
+            "RCON7274": {"name": "Tier 1 Capital Ratio", "type": "ratio"},
+            "RCON7275": {"name": "Total Capital Ratio", "type": "ratio"},
+            "RCON7204": {"name": "Tier 1 Leverage Ratio", "type": "ratio"}
+        }
+        
+        # Extract specific fields from all schedules
+        call_report_schedules = parsed_data.get("call_report_schedules", {})
+        
+        for schedule_name, schedule_data in call_report_schedules.items():
+            line_items = schedule_data.get("line_items", [])
+            
+            for item in line_items:
+                field_code = item.get("mdrm_code") or item.get("line_code")
+                if field_code in specific_fields:
+                    field_info = field_mappings.get(field_code, {"name": field_code, "type": "unknown"})
+                    
+                    filtered_data["capital_ratios"][field_code] = {
+                        "name": field_info["name"],
+                        "value": item.get("value"),
+                        "formatted_value": item.get("formatted_value"),
+                        "type": field_info["type"],
+                        "schedule": schedule_name
+                    }
+        
+        # Add summary
+        filtered_data["summary"] = {
+            "fields_requested": len(specific_fields),
+            "fields_found": len(filtered_data["capital_ratios"]),
+            "reporting_period": parsed_data.get("metadata", {}).get("reporting_period")
+        }
+        
+        return filtered_data
     
     def _format_error(self,
                      error_message: str,
@@ -1299,6 +1855,8 @@ Returns: Structured response with parsed financial data, formatted ratios/amount
             return False
         
         try:
+            if not self.ffiec_client:
+                return False
             return await self.ffiec_client.test_connection()
         except Exception as e:
             logger.error("Connection test failed", error=str(e))

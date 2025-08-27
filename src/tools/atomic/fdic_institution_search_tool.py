@@ -93,8 +93,13 @@ Search Parameters:
 Returns structured data for each institution:
 - Institution name and location details
 - FDIC Certificate number (CERT) - required for financial data queries
+- RSSD ID (rssd) - Federal Reserve identifier for use with other banking APIs
 - Status and regulatory information
 - Asset size and branch count
+
+Note: RSSD IDs are automatically extracted from the appropriate FDIC field
+(RSSD or FED_RSSD) and provided in the standardized 'rssd' field for
+consistent downstream tool usage.
 
 Use Cases:
 1. Find specific bank: name="Bank of America"
@@ -143,12 +148,12 @@ Output is structured JSON, not text - no parsing required for downstream tools."
             
             with concurrent.futures.ThreadPoolExecutor() as executor:
                 future = executor.submit(
-                    lambda: asyncio.run(self._arun(name, city, state, active_only, limit, run_manager))
+                    lambda: asyncio.run(self._arun(name, city, state, active_only, limit, None))
                 )
                 return future.result()
                 
         except RuntimeError:
-            return asyncio.run(self._arun(name, city, state, active_only, limit, run_manager))
+            return asyncio.run(self._arun(name, city, state, active_only, limit, None))
     
     async def _arun(
         self,
@@ -225,11 +230,16 @@ Output is structured JSON, not text - no parsing required for downstream tools."
         
         for institution in institutions:
             # Create clean institution record including RSSD identifiers
+            # IMPORTANT FIX: The FDIC API returns RSSD IDs in the FED_RSSD field, not RSSD field
+            # Downstream tools expect the RSSD ID in the 'rssd' field, so we need to populate it
+            # from whichever source field actually contains the value (prioritize RSSD, fallback to FED_RSSD)
+            rssd_value = institution.rssd or institution.fed_rssd
+            
             inst_data = {
                 "name": institution.name,
                 "cert": institution.cert,
-                "rssd": institution.rssd,  # Include RSSD if available
-                "fed_rssd": institution.fed_rssd,  # Include FED_RSSD if available  
+                "rssd": rssd_value,  # Primary RSSD field - ensures downstream tools get the ID they need
+                "fed_rssd": institution.fed_rssd,  # Keep original FED_RSSD for reference/debugging
                 "location": {
                     "city": institution.city,
                     "county": institution.county,

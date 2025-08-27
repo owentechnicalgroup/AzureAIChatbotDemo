@@ -41,11 +41,18 @@ class RAGSearchTool(BaseTool):
     )
     args_schema: type[BaseModel] = RAGSearchInput
     
-    # Use object.__setattr__ to bypass Pydantic field validation
+    # Use object.__setattr__ to bypass Pydantic field validation  
     def __init__(self, settings: Settings, **kwargs):
         super().__init__(**kwargs)
-        object.__setattr__(self, '_search_service', SearchService(settings))
+        object.__setattr__(self, '_search_service', None)  # Lazy initialization
         object.__setattr__(self, '_settings', settings)
+    
+    def _get_search_service(self):
+        """Lazy initialization of search service to avoid startup costs."""
+        if self._search_service is None:
+            from src.rag_access.search_service import SearchService
+            object.__setattr__(self, '_search_service', SearchService(self._settings))
+        return self._search_service
     
     def _run(
         self,
@@ -69,6 +76,9 @@ class RAGSearchTool(BaseTool):
         import asyncio
         
         try:
+            # Initialize search service only when needed
+            search_service = self._get_search_service()
+            
             # Run async method in sync context
             try:
                 loop = asyncio.get_event_loop()
@@ -108,6 +118,9 @@ class RAGSearchTool(BaseTool):
             Formatted document context for agent to use in response generation
         """
         try:
+            # Initialize search service only when needed
+            search_service = self._get_search_service()
+            
             # Validate input
             if not query or not query.strip():
                 return "Please provide a valid search query."
@@ -127,7 +140,8 @@ class RAGSearchTool(BaseTool):
             context = SearchContext()
             
             # Execute document search and context formatting
-            response = await self._search_service.search_and_generate(rag_query, context)
+            search_service = self._get_search_service()
+            response = await search_service.search_and_generate(rag_query, context)
             
             # Return the formatted document context for the agent to use
             return response.content
@@ -139,18 +153,22 @@ class RAGSearchTool(BaseTool):
     def is_available(self) -> bool:
         """Check if RAG search is available."""
         try:
-            return self._search_service.is_available()
+            # Fast check without initializing search service
+            from pathlib import Path
+            persist_dir = Path(self._settings.chromadb_storage_path)
+            return persist_dir.exists() and any(persist_dir.iterdir())
         except Exception:
             return False
     
     async def get_tool_info(self) -> Dict[str, Any]:
         """Get information about this tool's capabilities."""
         try:
-            # Get available documents
-            documents = await self._search_service.get_available_documents()
+            # Get available documents (lazy initialization)
+            search_service = self._get_search_service()
+            documents = await search_service.get_available_documents()
             
             # Get health status
-            health = await self._search_service.health_check()
+            health = await search_service.health_check()
             
             return {
                 "name": self.name,

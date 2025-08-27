@@ -23,6 +23,7 @@ from langchain.memory import ConversationBufferWindowMemory
 from src.config.settings import Settings
 from src.utils.azure_langchain import create_azure_chat_openai
 from src.utils.error_handlers import handle_error, ChatbotBaseError
+from src.chatbot.tool_routing_instructions import get_tool_routing_instructions
 
 logger = structlog.get_logger(__name__)
 
@@ -121,135 +122,10 @@ class ChatbotAgent:
         
         base_prompt = base_prompts.get(prompt_type or "default", base_prompts["default"])
         
-        # Enhance prompt for multi-step conversations if tools are available
+        # Add optimized tool routing for multi-step conversations
         if self.enable_multi_step and self.tools:
-            tool_descriptions = []
-            for tool in self.tools:
-                tool_name = getattr(tool, 'name', 'unknown')
-                tool_descriptions.append(f"- {tool_name}: {getattr(tool, 'description', 'No description')[:100]}...")
-            
-            tools_text = "\n".join(tool_descriptions)
-            
-            # Check current user preference for general knowledge
-            general_knowledge_status = "ENABLED" if self.use_general_knowledge else "DISABLED"
-            
-            multi_step_addition = f"""
-
-INTELLIGENT DIRECT TOOL ROUTING - NO HIERARCHY:
-
-CURRENT USER SETTING: General Knowledge is {general_knowledge_status}
-
-QUERY TYPE RECOGNITION:
-Analyze the user's intent and route DIRECTLY to the appropriate tool. Do NOT use multiple tools unless explicitly needed for comparison.
-
-🏛️ BANK POLICIES & PROCESSES → rag_search
-Intent: User asking about organizational policies, procedures, compliance, documentation
-Keywords: "policy", "procedure", "compliance", "requirements", "documentation", "guidelines", "standards", "regulations", "process", "how to", "what does the document say"
-Examples:
-- "What are the compliance requirements for..."
-- "Show me the procedure for loan approval"
-- "What does the policy say about risk management"
-- "According to our documentation..."
-Action: rag_search(use_general_knowledge={self.use_general_knowledge})
-
-🔍 BANK INFORMATION & IDENTIFICATION → bank_lookup
-Intent: User wants to find or identify specific banks, bank locations, or basic bank details
-Keywords: "find", "locate", "search for", "banks in", "what banks", "which banks", "bank information", specific bank names, "RSSD", "certificate"
-Examples:
-- "Find Wells Fargo"
-- "What banks are in Chicago?"
-- "Banks in Texas with 'Community' in the name"
-- "Get me JPMorgan's RSSD ID"
-Action: bank_lookup() with appropriate search parameters
-
-📊 FINANCIAL CALCULATIONS & ANALYSIS → fdic_institution_search + fdic_financial_data  
-Intent: User wants financial metrics, ratios, calculations, or performance analysis
-Keywords: "calculate", "ratio", "ROA", "ROE", "capital", "assets", "performance", "financial", "metrics", "compare", "analyze", "what is [bank]'s", "how much"
-Process: First find bank with fdic_institution_search, then get financial data with fdic_financial_data using appropriate analysis_type
-Analysis Type Selection:
-- "profitability", "ROA", "ROE", "earnings" → analysis_type="profitability"
-- "capital ratio", "Tier 1", "regulatory capital" → analysis_type="capital_ratios"
-- "assets", "loans", "deposits" → analysis_type="balance_sheet_assets" or "balance_sheet_liabilities" 
-- "efficiency", "cost management" → analysis_type="efficiency_metrics"
-- Choose from 24 specialized analysis types based on specific user needs
-Examples:
-- "Calculate Wells Fargo's ROA" → fdic_institution_search("Wells Fargo") + fdic_financial_data(cert_id, analysis_type="profitability")
-- "What is JPMorgan's capital ratio?" → fdic_institution_search("JPMorgan") + fdic_financial_data(cert_id, analysis_type="capital_ratios")
-- "Analyze Bank of America's loan portfolio" → fdic_institution_search("Bank of America") + fdic_financial_data(cert_id, analysis_type="loan_portfolio")
-
-🏛️ CALL REPORT DATA → ffiec_call_report_data
-Intent: User requesting official FFIEC Call Report regulatory filings or detailed financial data
-Keywords: "call report", "FFIEC", "regulatory filing", "bank filing", "quarterly report", "RSSD", "facsimile", "official data"
-Call Report Data Categories:
-- Balance Sheet items: "total assets", "liabilities", "equity capital", "loan balances", "deposits"
-- Income Statement items: "net income", "interest income", "noninterest income", "operating expenses" 
-- Capital Adequacy: "Tier 1 capital", "risk-weighted assets", "capital ratios"
-- Loan Performance: "nonperforming loans", "charge-offs", "loan loss provisions"
-- Liquidity and Funding: "cash balances", "borrowings", "funding sources"
-- Institution-level metrics: "return on assets (ROA)", "return on equity (ROE)", "efficiency ratio"
-Examples:
-- "Get the call report for Wells Fargo"
-- "What is the latest FFIEC filing for RSSD 451965?"
-- "Show me the call report data for JPMorgan Chase"
-- "Retrieve the quarterly regulatory filing for Bank of America"
-- "I need the official FFIEC call report for this bank"
-- "What are Wells Fargo's nonperforming loans from the call report?"
-- "Show me JPMorgan's Tier 1 capital from their regulatory filing"
-Action: ffiec_call_report_data() with RSSD ID
-
-MULTI-TOOL SCENARIOS (Only when explicitly needed):
-- COMPARISON queries: "Compare document policy with Wells Fargo's ratios"
-  → rag_search THEN fdic_institution_search + fdic_financial_data
-- POLICY + DATA: "What does our lending policy say about institutions like JPMorgan?"
-  → rag_search THEN bank_lookup for context
-
-PERFORMANCE OPTIMIZATION:
-• Route to the SINGLE most appropriate tool first
-• Only use multiple tools when comparison is explicitly requested
-• Prefer simpler tools for basic information requests
-• Banking tools provide factual data regardless of General Knowledge setting"""
-            
-            # Add strict enforcement rules only when general knowledge is disabled
-            if not self.use_general_knowledge:
-                strict_enforcement = """
-
-DOCUMENT-ONLY MODE ENFORCEMENT:
-⚠️  When General Knowledge is DISABLED:
-• rag_search: Returns ONLY document-based information, no general knowledge supplementation
-• Banking tools: Always allowed for factual data (fdic_institution_search, fdic_financial_data, ffiec_call_report_data)
-• If rag_search finds no documents: "I don't have information about this in the available documents."
-• Clearly distinguish sources: "According to the documents..." vs "According to the banking data..."
-
-COMPLIANCE CHECK:
-1. Did information come from rag_search results or banking tools?
-2. If using general knowledge, is General Knowledge enabled?
-3. Are sources clearly identified?"""
-                multi_step_addition += strict_enforcement
-            
-            multi_step_addition += f"""
-
-CRITICAL SOURCE CITATION RULES:
-• rag_search responses: Return exactly as provided (built-in source citations)
-• Banking tools: Cite tool name, bank RSSD ID, and data source
-• Mixed responses: Clearly distinguish document sources vs tool-provided data
-• Never fabricate sources - only cite actual tools used and data retrieved
-
-DIRECT ROUTING EXAMPLES:
-• "Find Wells Fargo" → bank_lookup (direct bank identification)
-• "What does the policy say about compliance?" → rag_search (document content)
-• "Calculate JPMorgan's ROA" → fdic_institution_search + fdic_financial_data with analysis_type="profitability"
-• "Banks in Chicago" → bank_lookup (location search)
-
-Available tools:
-{tools_text}
-
-PERFORMANCE PRINCIPLES:
-• Choose the SINGLE most appropriate tool for each query
-• Avoid multi-tool usage unless comparison is explicitly requested
-• Use concise, well-structured responses with proper source citations
-• Include "## Sources" section listing tools used and data sources"""
-            
-            return base_prompt + multi_step_addition
+            tool_routing = get_tool_routing_instructions(self.use_general_knowledge, self.tools)
+            return base_prompt + "\n\n" + tool_routing
         
         return base_prompt
     
@@ -260,8 +136,8 @@ PERFORMANCE PRINCIPLES:
             """Add system prompt and manage context window."""
             result: List[BaseMessage] = [SystemMessage(content=self.system_prompt)]
             
-            # Simple context window management
-            max_messages = (self.settings.max_conversation_turns * 2) if self.settings.max_conversation_turns else 20
+            # Simple context window management - reduced for performance
+            max_messages = (self.settings.max_conversation_turns * 2) if self.settings.max_conversation_turns else 6
             recent_messages = messages[-max_messages:] if len(messages) > max_messages else messages
             
             result.extend([msg for msg in recent_messages if not isinstance(msg, SystemMessage)])
@@ -297,12 +173,12 @@ PERFORMANCE PRINCIPLES:
             prompt=prompt_template
         )
         
-        # Create conversation memory for multi-step context
+        # Create conversation memory for multi-step context - reduced for performance
         memory = ConversationBufferWindowMemory(
             memory_key="chat_history",
             output_key="output",
             return_messages=True,
-            k=10  # Remember last 10 exchanges
+            k=3  # Remember last 3 exchanges
         )
         
         # Create agent executor with Azure-optimized settings
@@ -311,7 +187,7 @@ PERFORMANCE PRINCIPLES:
             tools=self.tools,
             memory=memory,
             verbose=False,  # Disable verbose to avoid callback issues
-            max_iterations=5,  # Prevent infinite loops
+            max_iterations=5,  # Restored original value
             early_stopping_method="force",  # Updated to supported value (was "generate")
             handle_parsing_errors=True
         )
@@ -336,8 +212,7 @@ PERFORMANCE PRINCIPLES:
                 # Multi-step mode: Use agent executor with RAG tools
                 self.logger.info("Processing with multi-step agent executor")
                 result = self.agent_executor.invoke({
-                    "input": user_message,
-                    "chat_history": []  # Agent executor manages memory internally
+                    "input": user_message
                 })
                 response_content = result.get("output", "")
                 processing_mode = "multi-step"
@@ -391,8 +266,7 @@ PERFORMANCE PRINCIPLES:
                 # Multi-step mode: Stream from agent executor
                 self.logger.info("Streaming with multi-step agent executor")
                 for chunk in self.agent_executor.stream({
-                    "input": user_message,
-                    "chat_history": []  # Agent manages memory internally
+                    "input": user_message
                 }):
                     # Agent executor streams structured output
                     if 'output' in chunk:

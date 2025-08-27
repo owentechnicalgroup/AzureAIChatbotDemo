@@ -28,71 +28,29 @@ class FFIECCallReportRequest(BaseModel):
     """Input schema for FFIEC Call Report and UBPR data requests."""
     
     rssd_id: str = Field(
-        description="Bank RSSD identifier (required)",
-        example="451965"
-    )
-    reporting_period: Optional[str] = Field(
-        default=None,
-        description="Specific reporting period in YYYY-MM-DD format (optional)",
-        example="2024-06-30"
-    )
-    facsimile_format: str = Field(
-        default="SDF",
-        description="Report format: SDF, XBRL, or PDF (for call reports)"
-    )
-    data_type: str = Field(
-        default="call_report", 
-        description="Data type: 'call_report' for raw regulatory data or 'ubpr' for processed performance ratios"
-    )
-
-
-class FFIECCallReportData(BaseModel):
-    """
-    Input model for FFIEC Call Report data requests.
-    
-    Represents a request to retrieve call report data from FFIEC CDR
-    with proper validation and field descriptions.
-    """
-    
-    rssd_id: str = Field(
         ...,
-        description="Bank RSSD ID for call report retrieval",
-        min_length=1,
-        max_length=10
+        description="Bank RSSD identifier (required)"
     )
     reporting_period: Optional[str] = Field(
         None,
-        description="Specific reporting period (YYYY-MM-DD) or None for latest"
+        description="Specific reporting period in YYYY-MM-DD format (optional)"
     )
     facsimile_format: str = Field(
-        "PDF",
-        description="Output format: PDF, XBRL, or SDF"
+        "SDF",
+        description="Report format: SDF, XBRL, or PDF (for call reports)"
     )
-    
-    @field_validator("rssd_id")
-    @classmethod
-    def validate_rssd_format(cls, v: str) -> str:
-        """Validate RSSD ID format."""
-        if not validate_rssd_id(v):
-            raise ValueError("RSSD ID must be 1-10 digits")
-        return v
-    
-    @field_validator("reporting_period")
-    @classmethod
-    def validate_period_format(cls, v: Optional[str]) -> Optional[str]:
-        """Validate reporting period format."""
-        if v is not None and not validate_reporting_period(v):
-            raise ValueError("Reporting period must be in YYYY-MM-DD format")
-        return v
-    
-    @field_validator("facsimile_format")
-    @classmethod
-    def validate_format_type(cls, v: str) -> str:
-        """Validate facsimile format."""
-        if not validate_facsimile_format(v):
-            valid_formats = list(FFIEC_FACSIMILE_FORMATS.values())
-            raise ValueError(f"Format must be one of: {valid_formats}")
-        return v.upper()
+    data_type: str = Field(
+        "call_report", 
+        description="Data type: 'call_report' for raw regulatory data or 'ubpr' for processed performance ratios"
+    )
+    schedules: Optional[List[str]] = Field(
+        None,
+        description="Specific Call Report schedules to retrieve (optional). If not specified, returns a summary. Available schedules: RC-A (Assets), RC-B (Securities), RC-C (Loans), RC-E (Deposits), RC-R (Regulatory Capital), RI (Income Statement), RC-G (Other Assets), RC-H (Other Liabilities), RC-K (Quarterly Averages), RC-L (Derivatives), RC-M (Memoranda), RC-N (Past Due), RC-O (Other Data), RC-P (Private Label Securities), RC-Q (Assets and Liabilities), RC-S (Servicing), RC-T (Fiduciary), RC-V (Variable Interest Entities)"
+    )
+    specific_fields: Optional[List[str]] = Field(
+        None,
+        description="Specific RCON/RCOA field codes to extract (e.g., ['RCON8274', 'RCON7273']). If specified, only these fields will be returned from the schedules."
+    )
 
 
 class FFIECCallReportData(BaseModel):
