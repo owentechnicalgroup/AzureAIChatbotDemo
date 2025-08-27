@@ -20,21 +20,32 @@ def get_tool_routing_instructions(use_general_knowledge: bool, tools: list) -> s
 TOOL ROUTING (General Knowledge: {'ON' if use_general_knowledge else 'OFF'}):
 
 🔍 Documents/Policies → rag_search
-🏛️ Bank Search → fdic_institution_search  
-📊 Financial Data → fdic_financial_data (DEFAULT for most ratios)
-📋 Call Reports → ffiec_call_report_data (SPECIFIC capital ratios ONLY)
+🏛️ Bank Search → fdic_institution_search (try exact name first, then variations)
+📊 Financial Data → fdic_financial_data (FIRST CHOICE - comprehensive financial metrics)
+📋 Call Reports → ffiec_call_report_data (ONLY for specific capital ratios when requested)
 
-CAPITAL RATIO ROUTING:
-Use ffiec_call_report_data for these SPECIFIC ratios with field filtering:
+PRIORITIZATION RULES:
+1. ALWAYS use fdic_financial_data FIRST for ALL financial questions
+2. NEVER use ffiec_call_report_data unless user explicitly mentions these EXACT terms:
+   • "CET1", "Common Equity Tier 1", "Tier 1 Capital", "Total Capital Ratio", "Leverage Ratio", "Capital Adequacy"
+3. If user asks for "financial data", "performance", "ratios" (generic) → use fdic_financial_data
+4. If user asks for "capital ratios" without specifying which ones → use fdic_financial_data
 
-• CET1 Ratio → schedules=["RCRI"], specific_fields=["RCON8274", "RCON3792", "RCON7273"]
-• Tier 1 Capital Ratio → schedules=["RCRI"], specific_fields=["RCON8275", "RCON3792", "RCON7274"] 
-• Total Capital Ratio → schedules=["RCRI"], specific_fields=["RCON8276", "RCON3792", "RCON7275"]
-• Tier 1 Leverage Ratio → schedules=["RCRI", "RCK"], specific_fields=["RCON8275", "RCOA3368", "RCON7204"]
+CRITICAL: RSSD ID HANDLING
+When using ffiec_call_report_data, ALWAYS use the EXACT RSSD ID from fdic_institution_search results.
+DO NOT use CERT numbers or other identifiers - only RSSD ID.
 
-ALWAYS use specific_fields parameter for capital ratios to get only the 3-4 fields needed instead of 50+ fields.
+CAPITAL RATIO WORKFLOW:
+1. First: Use fdic_institution_search to get bank's RSSD ID
+2. Then: Use ffiec_call_report_data with that EXACT RSSD ID
 
-ALL OTHER FINANCIAL QUERIES → fdic_financial_data (ROA, ROE, efficiency, etc.)
+CAPITAL RATIO ROUTING (when specifically requested):
+• CET1 Ratio → schedules=["RCRI"], specific_fields=["RCOAP793", "RCOAP859", "RCOAA223"]  
+• Tier 1 Capital Ratio → schedules=["RCRI"], specific_fields=["RCOA7206", "RCOA8274", "RCOAA223"]
+• Total Capital Ratio → schedules=["RCRI"], specific_fields=["RCOA7205", "RCOA3792", "RCOAA223"] 
+• Tier 1 Leverage Ratio → schedules=["RCRI"], specific_fields=["RCOA7204", "RCOA8274", "RCOAA224"]
+
+DEFAULT: Use fdic_financial_data for ROA, ROE, efficiency, profitability, asset quality, etc.
 
 Tools: {tools_text}"""
     
